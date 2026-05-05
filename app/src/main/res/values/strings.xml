@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Insta Share Downloader</string>
+    <string name="main_title">Instagram 공유 다운로드</string>
+    <string name="main_subtitle">Instagram에서 링크를 공유하면 여기로 받아서 공개 미디어를 저장합니다.</string>
+    <string name="url_hint">https://www.instagram.com/reel/...</string>
+    <string name="login">Instagram 로그인</string>
+    <string name="download">다운로드</string>
+    <string name="waiting">대기 중</string>
+</resources>
