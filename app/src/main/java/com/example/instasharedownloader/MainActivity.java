@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -92,6 +93,8 @@ public final class MainActivity extends Activity {
     private Button loginButton;
     private Button overlayButton;
     private TextView logView;
+    private TextView loginStatusChip;
+    private TextView overlayStatusChip;
     private String pendingUrl;
 
     @Override
@@ -111,7 +114,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        updateOverlayButton();
+        updateSetupStatus();
     }
 
     @Override
@@ -133,28 +136,79 @@ public final class MainActivity extends Activity {
     }
 
     private View buildContentView() {
-        int padding = dp(20);
+        ScrollView page = new ScrollView(this);
+        page.setFillViewport(true);
+        page.setBackgroundColor(Ui.BG);
+
+        int padding = dp(18);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(padding, padding + dp(12), padding, padding);
-        root.setBackgroundColor(Color.rgb(247, 248, 250));
+        root.setPadding(padding, padding + dp(10), padding, padding);
+        page.addView(root, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT));
 
-        TextView title = new TextView(this);
-        title.setText(R.string.main_title);
-        title.setTextSize(24);
-        title.setTextColor(Color.rgb(24, 30, 36));
-        title.setGravity(Gravity.START);
-        title.setTypeface(title.getTypeface(), Typeface.BOLD);
-        root.addView(title, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        TextView eyebrow = Ui.text(this, "INSTA SHARE", 12, Ui.BRAND, true);
+        root.addView(eyebrow);
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText(R.string.main_subtitle);
-        subtitle.setTextSize(14);
-        subtitle.setTextColor(Color.rgb(80, 90, 100));
-        subtitle.setPadding(0, dp(8), 0, dp(18));
+        TextView title = Ui.text(this, getString(R.string.main_title), 28, Ui.TEXT, true);
+        title.setPadding(0, dp(4), 0, 0);
+        root.addView(title);
+
+        TextView subtitle = Ui.text(this, getString(R.string.main_subtitle), 15, Ui.MUTED, false);
+        subtitle.setPadding(0, dp(8), 0, dp(14));
         root.addView(subtitle);
+
+        LinearLayout chipRow = new LinearLayout(this);
+        chipRow.setOrientation(LinearLayout.HORIZONTAL);
+        loginStatusChip = Ui.chip(this, "", Ui.WARNING, Color.rgb(255, 246, 229));
+        overlayStatusChip = Ui.chip(this, "", Ui.WARNING, Color.rgb(255, 246, 229));
+        chipRow.addView(loginStatusChip);
+        LinearLayout.LayoutParams overlayChipParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        overlayChipParams.setMargins(dp(8), 0, 0, 0);
+        chipRow.addView(overlayStatusChip, overlayChipParams);
+        root.addView(chipRow);
+
+        LinearLayout setupCard = Ui.card(this, 16, 22);
+        addTopMargin(root, setupCard, 16);
+        setupCard.addView(Ui.text(this, "공유 다운로드 준비", 18, Ui.TEXT, true));
+
+        TextView setupBody = Ui.text(this, "Instagram 세션과 오버레이 권한을 준비하면 공유 화면 위에서 바로 선택하고 저장할 수 있습니다.", 14, Ui.MUTED, false);
+        setupBody.setPadding(0, dp(6), 0, dp(12));
+        setupCard.addView(setupBody);
+
+        loginButton = new Button(this);
+        loginButton.setText(R.string.login);
+        Ui.styleSecondary(loginButton);
+        loginButton.setOnClickListener(v -> startActivity(new Intent(this, LoginActivity.class)));
+        setupCard.addView(buildActionRow(
+                "Instagram 로그인",
+                "비공개 세션이 필요한 게시물 분석에 사용합니다.",
+                loginButton));
+
+        overlayButton = new Button(this);
+        overlayButton.setText(R.string.overlay_permission);
+        Ui.styleSecondary(overlayButton);
+        overlayButton.setOnClickListener(v -> openOverlaySettings());
+        View overlayRow = buildActionRow(
+                "화면 위 선택창",
+                "공유 후 앱 전체 화면 대신 작은 오버레이를 띄웁니다.",
+                overlayButton);
+        LinearLayout.LayoutParams overlayRowParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        overlayRowParams.setMargins(0, dp(10), 0, 0);
+        setupCard.addView(overlayRow, overlayRowParams);
+
+        LinearLayout manualCard = Ui.card(this, 16, 22);
+        addTopMargin(root, manualCard, 14);
+        manualCard.addView(Ui.text(this, "링크 직접 다운로드", 18, Ui.TEXT, true));
+
+        TextView manualBody = Ui.text(this, "공유가 아니라 링크를 붙여넣어 테스트할 때 사용합니다.", 13, Ui.MUTED, false);
+        manualBody.setPadding(0, dp(6), 0, dp(10));
+        manualCard.addView(manualBody);
 
         urlField = new EditText(this);
         urlField.setSingleLine(false);
@@ -163,53 +217,63 @@ public final class MainActivity extends Activity {
         urlField.setImeOptions(EditorInfo.IME_ACTION_DONE);
         urlField.setHint(R.string.url_hint);
         urlField.setTextSize(15);
-        root.addView(urlField, new LinearLayout.LayoutParams(
+        urlField.setTextColor(Ui.TEXT);
+        urlField.setHintTextColor(Ui.FAINT);
+        urlField.setPadding(dp(14), dp(12), dp(14), dp(12));
+        urlField.setBackground(Ui.roundedStroke(this, Ui.PANEL, 16, Ui.LINE, 1));
+        manualCard.addView(urlField, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        loginButton = new Button(this);
-        loginButton.setText(R.string.login);
-        loginButton.setAllCaps(false);
-        loginButton.setOnClickListener(v -> startActivity(new Intent(this, LoginActivity.class)));
-        LinearLayout.LayoutParams loginParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(48));
-        loginParams.setMargins(0, dp(12), 0, 0);
-        root.addView(loginButton, loginParams);
-
-        overlayButton = new Button(this);
-        overlayButton.setText(R.string.overlay_permission);
-        overlayButton.setAllCaps(false);
-        overlayButton.setOnClickListener(v -> openOverlaySettings());
-        LinearLayout.LayoutParams overlayParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(48));
-        overlayParams.setMargins(0, dp(8), 0, 0);
-        root.addView(overlayButton, overlayParams);
-
         downloadButton = new Button(this);
         downloadButton.setText(R.string.download);
-        downloadButton.setAllCaps(false);
+        Ui.stylePrimary(downloadButton);
         downloadButton.setOnClickListener(v -> startDownload(urlField.getText().toString()));
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(52));
-        buttonParams.setMargins(0, dp(8), 0, dp(12));
-        root.addView(downloadButton, buttonParams);
+        downloadParams.setMargins(0, dp(10), 0, 0);
+        manualCard.addView(downloadButton, downloadParams);
 
-        ScrollView scroll = new ScrollView(this);
-        logView = new TextView(this);
-        logView.setTextSize(14);
-        logView.setTextColor(Color.rgb(38, 45, 52));
-        logView.setText(R.string.waiting);
-        logView.setPadding(dp(14), dp(14), dp(14), dp(14));
-        scroll.addView(logView);
-        root.addView(scroll, new LinearLayout.LayoutParams(
+        LinearLayout logCard = Ui.card(this, 16, 22);
+        addTopMargin(root, logCard, 14);
+        logCard.addView(Ui.text(this, "진행 상태", 18, Ui.TEXT, true));
+
+        logView = Ui.text(this, getString(R.string.waiting), 14, Ui.TEXT, false);
+        logView.setPadding(dp(14), dp(12), dp(14), dp(12));
+        logView.setBackground(Ui.rounded(this, Ui.PANEL, 16));
+        LinearLayout.LayoutParams logParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f));
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        logParams.setMargins(0, dp(10), 0, 0);
+        logCard.addView(logView, logParams);
 
-        return root;
+        updateSetupStatus();
+        return page;
+    }
+
+    private View buildActionRow(String title, String detail, Button button) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(12), dp(12), dp(12), dp(12));
+        row.setBackground(Ui.rounded(this, Ui.PANEL, 18));
+
+        row.addView(Ui.text(this, title, 15, Ui.TEXT, true));
+        TextView detailView = Ui.text(this, detail, 13, Ui.MUTED, false);
+        detailView.setPadding(0, dp(3), 0, dp(10));
+        row.addView(detailView);
+        row.addView(button, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(48)));
+        return row;
+    }
+
+    private void addTopMargin(LinearLayout parent, View child, int topDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, dp(topDp), 0, 0);
+        parent.addView(child, params);
     }
 
     private void openOverlaySettings() {
@@ -219,11 +283,36 @@ public final class MainActivity extends Activity {
         startActivity(intent);
     }
 
-    private void updateOverlayButton() {
-        if (overlayButton == null) return;
-        overlayButton.setText(Settings.canDrawOverlays(this)
-                ? R.string.overlay_permission_granted
-                : R.string.overlay_permission);
+    private void updateSetupStatus() {
+        boolean loggedIn = hasInstagramSession();
+        boolean overlayAllowed = Settings.canDrawOverlays(this);
+
+        if (loginStatusChip != null) {
+            applyStatusChip(
+                    loginStatusChip,
+                    loggedIn ? "Instagram 로그인됨" : "Instagram 로그인 필요",
+                    loggedIn);
+        }
+        if (overlayStatusChip != null) {
+            applyStatusChip(
+                    overlayStatusChip,
+                    overlayAllowed ? "오버레이 허용됨" : "오버레이 권한 필요",
+                    overlayAllowed);
+        }
+        if (overlayButton != null) {
+            overlayButton.setText(overlayAllowed
+                    ? R.string.overlay_permission_granted
+                    : R.string.overlay_permission);
+        }
+    }
+
+    private void applyStatusChip(TextView chip, String text, boolean ready) {
+        chip.setText(text);
+        chip.setTextColor(ready ? Ui.SUCCESS : Ui.WARNING);
+        chip.setBackground(Ui.rounded(
+                this,
+                ready ? Color.rgb(231, 247, 238) : Color.rgb(255, 246, 229),
+                999));
     }
 
     private void handleIncomingIntent(Intent intent) {
@@ -380,20 +469,13 @@ public final class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(14), dp(16), dp(12));
-        root.setBackgroundColor(Color.WHITE);
+        root.setPadding(dp(18), dp(16), dp(18), dp(14));
+        root.setBackground(Ui.roundedStroke(this, Ui.SURFACE, 24, Ui.LINE, 1));
 
-        TextView title = new TextView(this);
-        title.setText("다운로드할 미디어 선택");
-        title.setTextSize(19);
-        title.setTypeface(title.getTypeface(), Typeface.BOLD);
-        title.setTextColor(Color.rgb(24, 30, 36));
+        TextView title = Ui.text(this, "다운로드할 미디어 선택", 20, Ui.TEXT, true);
         root.addView(title);
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText("기본으로 모두 선택되어 있습니다.");
-        subtitle.setTextSize(13);
-        subtitle.setTextColor(Color.rgb(92, 100, 108));
+        TextView subtitle = Ui.text(this, "기본으로 모두 선택되어 있습니다.", 13, Ui.MUTED, false);
         subtitle.setPadding(0, dp(4), 0, dp(12));
         root.addView(subtitle);
 
@@ -407,7 +489,7 @@ public final class MainActivity extends Activity {
             MediaItem item = items.get(i);
             int index = i;
             FrameLayout cell = new FrameLayout(this);
-            cell.setBackgroundColor(Color.rgb(235, 238, 241));
+            cell.setBackground(Ui.roundedStroke(this, Color.rgb(235, 238, 241), 16, Color.rgb(211, 218, 225), 1));
             cell.setPadding(dp(1), dp(1), dp(1), dp(1));
 
             ImageView image = new ImageView(this);
@@ -465,13 +547,13 @@ public final class MainActivity extends Activity {
 
         Button cancel = new Button(this);
         cancel.setText("취소");
-        cancel.setAllCaps(false);
+        Ui.styleGhost(cancel);
         cancel.setOnClickListener(v -> dialog.dismiss());
         actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(48), 1f));
 
         Button download = new Button(this);
         download.setText("선택 다운로드");
-        download.setAllCaps(false);
+        Ui.stylePrimary(download);
         download.setOnClickListener(v -> {
             ArrayList<MediaItem> chosen = new ArrayList<>();
             for (int i = 0; i < items.size(); i++) {
@@ -500,6 +582,7 @@ public final class MainActivity extends Activity {
         dialog.show();
         Window window = dialog.getWindow();
         if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         }
     }

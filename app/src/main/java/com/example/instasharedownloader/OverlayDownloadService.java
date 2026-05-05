@@ -12,7 +12,6 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -220,12 +219,32 @@ public final class OverlayDownloadService extends Service {
         TextView subtitle = new TextView(this);
         subtitle.setText("기본으로 모두 선택되어 있습니다.");
         subtitle.setTextSize(13);
-        subtitle.setTextColor(Color.rgb(92, 100, 108));
+        subtitle.setTextColor(Ui.MUTED);
         subtitle.setPadding(0, dp(4), 0, dp(12));
         panel.addView(subtitle);
 
         boolean[] selected = new boolean[items.size()];
         Arrays.fill(selected, true);
+        CheckBox[] checkBoxes = new CheckBox[items.size()];
+        FrameLayout[] cells = new FrameLayout[items.size()];
+        final Runnable[] updateSelectionState = new Runnable[1];
+
+        LinearLayout selectTools = new LinearLayout(this);
+        selectTools.setOrientation(LinearLayout.HORIZONTAL);
+        selectTools.setGravity(Gravity.END);
+
+        Button selectAll = new Button(this);
+        selectAll.setText("전체 선택");
+        Ui.styleSecondary(selectAll);
+        selectTools.addView(selectAll, new LinearLayout.LayoutParams(0, dp(42), 1f));
+
+        Button clearAll = new Button(this);
+        clearAll.setText("전체 해제");
+        Ui.styleGhost(clearAll);
+        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        clearParams.setMargins(dp(8), 0, 0, 0);
+        selectTools.addView(clearAll, clearParams);
+        panel.addView(selectTools);
 
         ScrollView scrollView = new ScrollView(this);
         GridLayout grid = new GridLayout(this);
@@ -239,8 +258,9 @@ public final class OverlayDownloadService extends Service {
             MediaItem item = items.get(i);
             int index = i;
             FrameLayout cell = new FrameLayout(this);
-            cell.setBackgroundColor(Color.rgb(235, 238, 241));
+            cell.setBackground(Ui.roundedStroke(this, Color.rgb(235, 238, 241), 16, Color.rgb(211, 218, 225), 1));
             cell.setPadding(dp(1), dp(1), dp(1), dp(1));
+            cells[index] = cell;
 
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -263,6 +283,7 @@ public final class OverlayDownloadService extends Service {
 
             CheckBox checkBox = new CheckBox(this);
             checkBox.setChecked(true);
+            checkBoxes[index] = checkBox;
             FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(dp(48), dp(48));
             checkParams.gravity = Gravity.END | Gravity.TOP;
             cell.addView(checkBox, checkParams);
@@ -271,11 +292,13 @@ public final class OverlayDownloadService extends Service {
                 selected[index] = !selected[index];
                 checkBox.setChecked(selected[index]);
                 cell.setAlpha(selected[index] ? 1f : 0.45f);
+                if (updateSelectionState[0] != null) updateSelectionState[0].run();
             };
             cell.setOnClickListener(toggle);
             checkBox.setOnClickListener(v -> {
                 selected[index] = checkBox.isChecked();
                 cell.setAlpha(selected[index] ? 1f : 0.45f);
+                if (updateSelectionState[0] != null) updateSelectionState[0].run();
             });
 
             GridLayout.LayoutParams params = new GridLayout.LayoutParams();
@@ -284,6 +307,26 @@ public final class OverlayDownloadService extends Service {
             params.setMargins(dp(3), dp(3), dp(3), dp(3));
             grid.addView(cell, params);
         }
+
+        updateSelectionState[0] = () -> {
+            int count = 0;
+            for (int i = 0; i < selected.length; i++) {
+                if (selected[i]) count++;
+                if (checkBoxes[i] != null) checkBoxes[i].setChecked(selected[i]);
+                if (cells[i] != null) cells[i].setAlpha(selected[i] ? 1f : 0.42f);
+            }
+            subtitle.setTextColor(Ui.MUTED);
+            subtitle.setText("선택됨 " + count + "/" + items.size());
+        };
+        updateSelectionState[0].run();
+        selectAll.setOnClickListener(v -> {
+            Arrays.fill(selected, true);
+            updateSelectionState[0].run();
+        });
+        clearAll.setOnClickListener(v -> {
+            Arrays.fill(selected, false);
+            updateSelectionState[0].run();
+        });
 
         scrollView.addView(grid);
         panel.addView(scrollView, new LinearLayout.LayoutParams(
@@ -297,13 +340,13 @@ public final class OverlayDownloadService extends Service {
 
         Button cancel = new Button(this);
         cancel.setText("취소");
-        cancel.setAllCaps(false);
+        Ui.styleGhost(cancel);
         cancel.setOnClickListener(v -> closeAndStop());
         actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(48), 1f));
 
         Button download = new Button(this);
         download.setText("선택 다운로드");
-        download.setAllCaps(false);
+        Ui.stylePrimary(download);
         download.setOnClickListener(v -> {
             ArrayList<MediaItem> chosen = new ArrayList<>();
             for (int i = 0; i < items.size(); i++) {
@@ -311,6 +354,7 @@ public final class OverlayDownloadService extends Service {
             }
             if (chosen.isEmpty()) {
                 subtitle.setText("최소 한 개를 선택해주세요.");
+                subtitle.setTextColor(Ui.DANGER);
                 return;
             }
             showProgressOverlay("다운로드 중", "선택한 미디어 " + chosen.size() + "개 다운로드 시작");
@@ -370,9 +414,10 @@ public final class OverlayDownloadService extends Service {
 
         statusView = new TextView(this);
         statusView.setText(message);
-        statusView.setTextColor(Color.rgb(64, 72, 80));
+        statusView.setTextColor(Ui.TEXT);
         statusView.setTextSize(14);
-        statusView.setPadding(0, dp(6), 0, 0);
+        statusView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        statusView.setBackground(Ui.rounded(this, Ui.PANEL, 16));
         panel.addView(statusView);
     }
 
@@ -385,14 +430,14 @@ public final class OverlayDownloadService extends Service {
 
         TextView body = new TextView(this);
         body.setText(message);
-        body.setTextColor(Color.rgb(64, 72, 80));
+        body.setTextColor(Ui.MUTED);
         body.setTextSize(14);
         body.setPadding(0, dp(8), 0, dp(14));
         panel.addView(body);
 
         Button close = new Button(this);
         close.setText("닫기");
-        close.setAllCaps(false);
+        Ui.stylePrimary(close);
         close.setOnClickListener(v -> closeAndStop());
         panel.addView(close, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -407,7 +452,7 @@ public final class OverlayDownloadService extends Service {
         }
 
         overlayRoot = new FrameLayout(this);
-        overlayRoot.setBackgroundColor(Color.argb(118, 0, 0, 0));
+        overlayRoot.setBackgroundColor(Color.argb(130, 0, 0, 0));
         overlayRoot.setFocusableInTouchMode(true);
         overlayRoot.setOnKeyListener((view, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
@@ -419,11 +464,8 @@ public final class OverlayDownloadService extends Service {
 
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(16), dp(14), dp(16), dp(14));
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.WHITE);
-        background.setCornerRadius(dp(18));
-        panel.setBackground(background);
+        panel.setPadding(dp(18), dp(16), dp(18), dp(16));
+        panel.setBackground(Ui.roundedStroke(this, Ui.SURFACE, 26, Ui.LINE, 1));
 
         FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -458,18 +500,14 @@ public final class OverlayDownloadService extends Service {
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView title = new TextView(this);
-        title.setText(titleText);
-        title.setTextColor(Color.rgb(24, 30, 36));
-        title.setTextSize(19);
-        title.setTypeface(title.getTypeface(), Typeface.BOLD);
+        TextView title = Ui.text(this, titleText, 20, Ui.TEXT, true);
         header.addView(title, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 1f));
 
         Button close = new Button(this);
         close.setText("X");
-        close.setAllCaps(false);
+        Ui.styleGhost(close);
         close.setOnClickListener(v -> closeAndStop());
         header.addView(close, new LinearLayout.LayoutParams(dp(46), dp(42)));
 

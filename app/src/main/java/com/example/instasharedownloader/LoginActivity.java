@@ -1,7 +1,6 @@
 package com.example.instasharedownloader;
 
 import android.app.Activity;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -24,27 +23,32 @@ public final class LoginActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundColor(Ui.BG);
 
-        TextView hint = new TextView(this);
-        hint.setText("Instagram에 로그인한 뒤 완료를 누르세요. 이 쿠키는 앱 내부 WebView에만 저장됩니다.");
-        hint.setTextSize(14);
-        hint.setTextColor(Color.rgb(45, 52, 60));
-        hint.setPadding(dp(14), dp(12), dp(14), dp(8));
-        root.addView(hint, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout header = Ui.card(this, 14, 0);
+        header.setBackgroundColor(Ui.SURFACE);
+
+        TextView title = Ui.text(this, "Instagram 로그인", 19, Ui.TEXT, true);
+        header.addView(title);
+
+        TextView hint = Ui.text(this, "로그인한 뒤 완료를 누르세요. 쿠키는 앱 내부 WebView에만 저장됩니다.", 14, Ui.MUTED, false);
+        hint.setPadding(0, dp(5), 0, dp(10));
+        header.addView(hint);
 
         Button done = new Button(this);
         done.setText("완료");
-        done.setAllCaps(false);
+        Ui.stylePrimary(done);
         done.setOnClickListener(v -> {
             CookieManager.getInstance().flush();
             finish();
         });
-        root.addView(done, new LinearLayout.LayoutParams(
+        header.addView(done, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(48)));
+
+        root.addView(header, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         webView = new WebView(this);
         WebSettings settings = webView.getSettings();

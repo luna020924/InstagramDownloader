@@ -108,7 +108,7 @@ public final class ShareActivity extends Activity {
 
         Button open = new Button(this);
         open.setText("권한 설정 열기");
-        open.setAllCaps(false);
+        Ui.stylePrimary(open);
         open.setOnClickListener(v -> openOverlaySettings());
         root.addView(open, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -116,7 +116,7 @@ public final class ShareActivity extends Activity {
 
         Button close = new Button(this);
         close.setText("취소");
-        close.setAllCaps(false);
+        Ui.styleGhost(close);
         close.setOnClickListener(v -> finish());
         LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -129,7 +129,7 @@ public final class ShareActivity extends Activity {
         LinearLayout root = buildPanel("Instagram 공유 다운로드", message);
         Button button = new Button(this);
         button.setText(action);
-        button.setAllCaps(false);
+        Ui.stylePrimary(button);
         button.setOnClickListener(v -> callback.run());
         root.addView(button, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -143,22 +143,12 @@ public final class ShareActivity extends Activity {
         outer.setPadding(dp(18), dp(18), dp(18), dp(18));
         outer.setBackgroundColor(Color.argb(120, 0, 0, 0));
 
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(18), dp(16), dp(18), dp(16));
-        panel.setBackgroundColor(Color.WHITE);
+        LinearLayout panel = Ui.card(this, 18, 24);
 
-        TextView title = new TextView(this);
-        title.setText(titleText);
-        title.setTextColor(Color.rgb(24, 30, 36));
-        title.setTextSize(19);
-        title.setTypeface(title.getTypeface(), Typeface.BOLD);
+        TextView title = Ui.text(this, titleText, 20, Ui.TEXT, true);
         panel.addView(title);
 
-        TextView body = new TextView(this);
-        body.setText(bodyText);
-        body.setTextColor(Color.rgb(76, 84, 92));
-        body.setTextSize(14);
+        TextView body = Ui.text(this, bodyText, 14, Ui.MUTED, false);
         body.setPadding(0, dp(8), 0, dp(14));
         panel.addView(body);
 
