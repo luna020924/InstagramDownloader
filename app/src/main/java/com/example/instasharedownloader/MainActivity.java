@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -45,7 +46,7 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_WRITE_STORAGE = 1001;
-    private static final String RENDERED_MEDIA_SCRIPT =
+    static final String RENDERED_MEDIA_SCRIPT =
             "(function(){"
                     + "const candidates=[],seen=new Set();"
                     + "const clean=u=>String(u||'').replace(/\\\\u0026/g,'&').replace(/\\\\\\//g,'/').replace(/\\\\/g,'');"
@@ -89,6 +90,7 @@ public final class MainActivity extends Activity {
     private EditText urlField;
     private Button downloadButton;
     private Button loginButton;
+    private Button overlayButton;
     private TextView logView;
     private String pendingUrl;
 
@@ -104,6 +106,12 @@ public final class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleIncomingIntent(intent);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateOverlayButton();
     }
 
     @Override
@@ -169,6 +177,16 @@ public final class MainActivity extends Activity {
         loginParams.setMargins(0, dp(12), 0, 0);
         root.addView(loginButton, loginParams);
 
+        overlayButton = new Button(this);
+        overlayButton.setText(R.string.overlay_permission);
+        overlayButton.setAllCaps(false);
+        overlayButton.setOnClickListener(v -> openOverlaySettings());
+        LinearLayout.LayoutParams overlayParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(48));
+        overlayParams.setMargins(0, dp(8), 0, 0);
+        root.addView(overlayButton, overlayParams);
+
         downloadButton = new Button(this);
         downloadButton.setText(R.string.download);
         downloadButton.setAllCaps(false);
@@ -192,6 +210,20 @@ public final class MainActivity extends Activity {
                 1f));
 
         return root;
+    }
+
+    private void openOverlaySettings() {
+        Intent intent = new Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + getPackageName()));
+        startActivity(intent);
+    }
+
+    private void updateOverlayButton() {
+        if (overlayButton == null) return;
+        overlayButton.setText(Settings.canDrawOverlays(this)
+                ? R.string.overlay_permission_granted
+                : R.string.overlay_permission);
     }
 
     private void handleIncomingIntent(Intent intent) {
