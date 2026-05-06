@@ -235,9 +235,13 @@ public final class OverlayDownloadService extends Service {
         panel.addView(count, countParams);
 
         Button sharedOnly = new Button(this);
-        sharedOnly.setText("이 스토리만");
+        sharedOnly.setText("이 스토리만 받기");
         Ui.stylePrimary(sharedOnly);
-        sharedOnly.setOnClickListener(v -> showSelectionOverlay(MediaExtractor.sharedStoryItemsOnly(items)));
+        sharedOnly.setOnClickListener(v -> {
+            List<MediaItem> sharedItems = MediaExtractor.sharedStoryItemsOnly(items);
+            showProgressOverlay("다운로드 중", "공유받은 스토리 " + sharedItems.size() + "개 다운로드 시작");
+            startSelectedDownload(sharedItems);
+        });
         panel.addView(sharedOnly, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(50)));

@@ -496,12 +496,15 @@ public final class MainActivity extends Activity {
         root.addView(count, countParams);
 
         Button sharedOnly = new Button(this);
-        sharedOnly.setText("이 스토리만");
+        sharedOnly.setText("이 스토리만 받기");
         Ui.stylePrimary(sharedOnly);
         sharedOnly.setOnClickListener(v -> {
             handled[0] = true;
             dialog.dismiss();
-            showSelectionDialog(MediaExtractor.sharedStoryItemsOnly(items));
+            List<MediaItem> sharedItems = MediaExtractor.sharedStoryItemsOnly(items);
+            logView.setText("");
+            appendLog("공유받은 스토리 " + sharedItems.size() + "개 다운로드 시작");
+            startSelectedDownload(sharedItems);
         });
         root.addView(sharedOnly, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
