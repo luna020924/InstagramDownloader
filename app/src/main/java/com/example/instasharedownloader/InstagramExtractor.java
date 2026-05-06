@@ -419,6 +419,9 @@ final class InstagramExtractor {
 
         if (request.username != null) {
             userId = resolveReelsTrayUserId(request.username, pageUrl, cookie);
+            if ((userId == null || userId.isEmpty()) && request.mediaId != null) {
+                userId = resolveMediaInfoUserId(request.mediaId, pageUrl, cookie);
+            }
             if (userId == null || userId.isEmpty()) {
                 String endpoint = "https://www.instagram.com/api/v1/users/web_profile_info/?username="
                         + urlEncode(request.username);
@@ -466,6 +469,27 @@ final class InstagramExtractor {
         } catch (IOException | JSONException e) {
         }
         return null;
+    }
+
+    private static String resolveMediaInfoUserId(String mediaId, String pageUrl, String cookie) {
+        if (cookie == null || cookie.isEmpty()) return null;
+        try {
+            String endpoint = "https://www.instagram.com/api/v1/media/"
+                    + urlEncode(mediaId)
+                    + "/info/";
+            String body = fetchApi(endpoint, pageUrl, cookie);
+            JSONObject root = new JSONObject(stripJsonPrefix(body));
+            JSONArray items = root.optJSONArray("items");
+            JSONObject item = items == null || items.length() == 0 ? null : items.optJSONObject(0);
+            JSONObject user = item == null ? null : item.optJSONObject("user");
+            if (user == null) return null;
+
+            String userId = user.optString("pk", null);
+            if (userId == null || userId.isEmpty()) userId = user.optString("id", null);
+            return userId == null || userId.isEmpty() ? null : userId;
+        } catch (IOException | JSONException e) {
+            return null;
+        }
     }
 
     private static String resolveProfileUserId(String endpoint, String pageUrl, String cookie) {
@@ -520,6 +544,11 @@ final class InstagramExtractor {
         String image = bestImageUrl(imageCandidates);
         String thumbnail = thumbnailImageUrl(imageCandidates);
         String video = bestVideoUrl(media.optJSONArray("video_versions"));
+        if (storyItem && storyShouldPreferImage(media) && image != null) {
+            add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, true, sharedStory);
+            return;
+        }
+
         if (video != null) {
             add(out, video, MediaItem.Kind.VIDEO, thumbnail == null ? image : thumbnail, storyItem, sharedStory);
             return;
@@ -528,6 +557,11 @@ final class InstagramExtractor {
         if (image != null) {
             add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, storyItem, sharedStory);
         }
+    }
+
+    private static boolean storyShouldPreferImage(JSONObject media) {
+        return media.optInt("original_media_type", 0) == 1
+                || media.optBoolean("is_story_image_with_music", false);
     }
 
     private static String bestVideoUrl(JSONArray versions) {
