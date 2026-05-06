@@ -15,6 +15,7 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -84,8 +85,46 @@ final class InstagramExtractor {
         }
     }
 
+    private static StoryRequest storyRequestFromUrl(String url) {
+        try {
+            URI uri = new URI(url);
+            String path = uri.getPath();
+            if (path == null) return null;
+
+            String[] parts = path.split("/");
+            if (parts.length >= 4
+                    && "stories".equalsIgnoreCase(parts[1])
+                    && "highlights".equalsIgnoreCase(parts[2])) {
+                return new StoryRequest(true, parts[3], null, null);
+            }
+
+            if (parts.length >= 3 && "stories".equalsIgnoreCase(parts[1])) {
+                String username = parts[2].isEmpty() ? null : parts[2];
+                String mediaId = parts.length >= 4 && parts[3].matches("\\d+") ? parts[3] : null;
+                return new StoryRequest(false, null, username, mediaId);
+            }
+
+            if (parts.length >= 3 && "s".equalsIgnoreCase(parts[1])) {
+                String mediaId = parts[2].matches("\\d+") ? parts[2] : null;
+                return new StoryRequest(false, null, null, mediaId);
+            }
+        } catch (URISyntaxException ignored) {
+        }
+        return null;
+    }
+
     static List<MediaItem> extract(String sharedUrl) throws IOException {
         String url = normalizeUrl(sharedUrl);
+
+        StoryRequest storyRequest = storyRequestFromUrl(url);
+        if (storyRequest != null) {
+            List<MediaItem> storyItems = tryExtractStoryMedia(url, storyRequest);
+            if (!storyItems.isEmpty()) {
+                return storyItems;
+            }
+            throw new IOException("No downloadable story media was found.");
+        }
+
         List<MediaItem> apiItems = tryExtractFromMediaInfoApi(url);
         if (!apiItems.isEmpty()) {
             return apiItems;
@@ -137,6 +176,147 @@ final class InstagramExtractor {
         } catch (IOException | JSONException e) {
             return new ArrayList<>();
         }
+    }
+
+    private static List<MediaItem> tryExtractStoryMedia(String pageUrl, StoryRequest request) throws IOException {
+        String cookie = CookieManager.getInstance().getCookie("https://www.instagram.com/");
+        if (cookie == null || !cookie.contains("sessionid=")) {
+            throw new IOException("Instagram login is required for story links.");
+        }
+
+        try {
+            if (request.highlight) {
+                String endpoint = "https://www.instagram.com/api/v1/feed/reels_media/?reel_ids=highlight%3A"
+                        + urlEncode(request.reelId);
+                String body = fetchApi(endpoint, pageUrl, cookie);
+                return parseStoryMedia(body, null);
+            }
+
+            String userId = resolveStoryUserId(pageUrl, request, cookie);
+            if (userId != null && request.mediaId != null) {
+                String endpoint = "https://www.instagram.com/api/v1/feed/reels_media/?media_id="
+                        + urlEncode(request.mediaId)
+                        + "&reel_ids="
+                        + urlEncode(userId);
+                String body = fetchApi(endpoint, pageUrl, cookie);
+                List<MediaItem> selected = parseStoryMedia(body, request.mediaId);
+                if (!selected.isEmpty()) return selected;
+            }
+
+            if (userId != null) {
+                String endpoint = "https://www.instagram.com/api/v1/feed/user/"
+                        + urlEncode(userId)
+                        + "/story/";
+                String body = fetchApi(endpoint, pageUrl, cookie);
+                return parseStoryMedia(body, request.mediaId);
+            }
+
+            if (request.mediaId != null) {
+                String endpoint = "https://www.instagram.com/api/v1/feed/reels_media/?media_id="
+                        + urlEncode(request.mediaId);
+                String body = fetchApi(endpoint, pageUrl, cookie);
+                return parseStoryMedia(body, request.mediaId);
+            }
+        } catch (JSONException e) {
+            return new ArrayList<>();
+        }
+
+        return new ArrayList<>();
+    }
+
+    private static List<MediaItem> parseStoryMedia(String json, String requestedMediaId) throws JSONException {
+        JSONObject root = new JSONObject(stripJsonPrefix(json));
+        JSONObject reel = firstStoryReel(root);
+        if (reel == null) return new ArrayList<>();
+
+        JSONArray items = reel.optJSONArray("items");
+        if (items == null) return new ArrayList<>();
+
+        LinkedHashMap<String, MediaItem> all = new LinkedHashMap<>();
+        LinkedHashMap<String, MediaItem> requested = new LinkedHashMap<>();
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+
+            LinkedHashMap<String, MediaItem> target = storyItemMatches(item, requestedMediaId)
+                    ? requested
+                    : all;
+            collectSingleMedia(item, target);
+        }
+
+        if (requestedMediaId != null && !requested.isEmpty()) {
+            return new ArrayList<>(requested.values());
+        }
+
+        if (requestedMediaId != null && requested.isEmpty()) {
+            collectAllStoryItems(items, all);
+        }
+        return new ArrayList<>(all.values());
+    }
+
+    private static void collectAllStoryItems(JSONArray items, Map<String, MediaItem> out) {
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item != null) collectSingleMedia(item, out);
+        }
+    }
+
+    private static JSONObject firstStoryReel(JSONObject root) {
+        JSONObject reel = root.optJSONObject("reel");
+        if (reel != null) return reel;
+
+        JSONArray reelsMedia = root.optJSONArray("reels_media");
+        if (reelsMedia != null && reelsMedia.length() > 0) {
+            JSONObject first = reelsMedia.optJSONObject(0);
+            if (first != null) return first;
+        }
+
+        JSONObject reels = root.optJSONObject("reels");
+        if (reels != null) {
+            JSONArray names = reels.names();
+            if (names != null && names.length() > 0) {
+                return reels.optJSONObject(names.optString(0));
+            }
+        }
+        return null;
+    }
+
+    private static boolean storyItemMatches(JSONObject item, String requestedMediaId) {
+        if (requestedMediaId == null) return false;
+        String id = item.optString("id", "");
+        String pk = item.optString("pk", "");
+        return id.equals(requestedMediaId)
+                || id.startsWith(requestedMediaId + "_")
+                || pk.equals(requestedMediaId);
+    }
+
+    private static String resolveStoryUserId(String pageUrl, StoryRequest request, String cookie) {
+        String userId = null;
+        try {
+            String html = fetch(pageUrl);
+            userId = firstMatch(html,
+                    "StoriesPage_(\\d+)",
+                    "\"user_id\"\\s*:\\s*\"(\\d+)\"",
+                    "\"owner\"\\s*:\\s*\\{[^}]*\"id\"\\s*:\\s*\"(\\d+)\"");
+        } catch (IOException ignored) {
+        }
+
+        if (userId != null || request.username == null) return userId;
+
+        try {
+            String endpoint = "https://www.instagram.com/api/v1/users/web_profile_info/?username="
+                    + urlEncode(request.username);
+            String body = fetchApi(endpoint, pageUrl, cookie);
+            JSONObject root = new JSONObject(stripJsonPrefix(body));
+            JSONObject data = root.optJSONObject("data");
+            JSONObject user = data == null ? null : data.optJSONObject("user");
+            if (user != null) {
+                userId = user.optString("id", null);
+                if (userId == null || userId.isEmpty()) userId = user.optString("pk", null);
+            }
+        } catch (IOException | JSONException ignored) {
+        }
+        return userId;
     }
 
     private static List<MediaItem> parseMediaInfo(String json) throws JSONException {
@@ -416,6 +596,8 @@ final class InstagramExtractor {
         connection.setRequestProperty("Referer", referer);
         connection.setRequestProperty("Cookie", cookie);
         connection.setRequestProperty("X-IG-App-ID", "1217981644879628");
+        connection.setRequestProperty("X-ASBD-ID", "129477");
+        connection.setRequestProperty("X-IG-WWW-Claim", "0");
         connection.setRequestProperty("X-Requested-With", "XMLHttpRequest");
         String csrf = cookieValue(cookie, "csrftoken");
         if (csrf != null) {
@@ -494,6 +676,23 @@ final class InstagramExtractor {
         return null;
     }
 
+    private static String firstMatch(String text, String... patterns) {
+        if (text == null) return null;
+        for (String pattern : patterns) {
+            Matcher matcher = Pattern.compile(pattern).matcher(text);
+            if (matcher.find()) return matcher.group(1);
+        }
+        return null;
+    }
+
+    private static String urlEncode(String value) {
+        try {
+            return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8.name());
+        } catch (Exception e) {
+            return value == null ? "" : value;
+        }
+    }
+
     private static String stripJsonPrefix(String value) {
         if (value != null && value.startsWith("for (;;);")) {
             return value.substring("for (;;);".length());
@@ -531,5 +730,19 @@ final class InstagramExtractor {
                 .replace("&#39;", "'")
                 .replace("&lt;", "<")
                 .replace("&gt;", ">");
+    }
+
+    private static final class StoryRequest {
+        final boolean highlight;
+        final String reelId;
+        final String username;
+        final String mediaId;
+
+        StoryRequest(boolean highlight, String reelId, String username, String mediaId) {
+            this.highlight = highlight;
+            this.reelId = reelId;
+            this.username = username;
+            this.mediaId = mediaId;
+        }
     }
 }
