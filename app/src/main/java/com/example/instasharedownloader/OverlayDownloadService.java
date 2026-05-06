@@ -111,7 +111,7 @@ public final class OverlayDownloadService extends Service {
         executor.execute(() -> {
             try {
                 List<MediaItem> items = MediaExtractor.extract(instagramUrl);
-                mainHandler.post(() -> showSelectionOverlay(items));
+                mainHandler.post(() -> showExtractedItems(instagramUrl, items));
             } catch (IOException e) {
                 if (shouldRenderWithWebView(e, instagramUrl)) {
                     postStatus("HTTP 추출 실패: " + e.getMessage());
@@ -200,6 +200,58 @@ public final class OverlayDownloadService extends Service {
         webView.loadUrl(instagramUrl);
     }
 
+    private void showExtractedItems(String sharedUrl, List<MediaItem> items) {
+        if (MediaExtractor.shouldAskStoryScope(sharedUrl, items)) {
+            showStoryScopeOverlay(items);
+        } else {
+            showSelectionOverlay(items);
+        }
+    }
+
+    private void showStoryScopeOverlay(List<MediaItem> items) {
+        ensureOverlayRoot();
+        if (panel == null) return;
+        panel.removeAllViews();
+        statusView = null;
+
+        addHeader("스토리 저장 범위");
+
+        int sharedCount = MediaExtractor.sharedStoryItemsOnly(items).size();
+        TextView body = Ui.text(
+                this,
+                "공유받은 스토리만 저장할지, 이 계정의 현재 다른 스토리까지 함께 볼지 선택하세요.",
+                14,
+                Ui.MUTED,
+                false);
+        body.setPadding(0, dp(8), 0, dp(12));
+        panel.addView(body);
+
+        TextView count = Ui.chip(this, "공유 " + sharedCount + "개 / 전체 " + items.size() + "개", Ui.BRAND_DARK, Color.rgb(230, 242, 247));
+        LinearLayout.LayoutParams countParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        countParams.setMargins(0, 0, 0, dp(14));
+        panel.addView(count, countParams);
+
+        Button sharedOnly = new Button(this);
+        sharedOnly.setText("이 스토리만");
+        Ui.stylePrimary(sharedOnly);
+        sharedOnly.setOnClickListener(v -> showSelectionOverlay(MediaExtractor.sharedStoryItemsOnly(items)));
+        panel.addView(sharedOnly, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(50)));
+
+        Button allStories = new Button(this);
+        allStories.setText("다른 스토리도 보기");
+        Ui.styleSecondary(allStories);
+        allStories.setOnClickListener(v -> showSelectionOverlay(items));
+        LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(50));
+        allParams.setMargins(0, dp(8), 0, 0);
+        panel.addView(allStories, allParams);
+    }
+
     private void showSelectionOverlay(List<MediaItem> items) {
         if (items == null || items.isEmpty()) {
             showDoneOverlay("다운로드 실패", "선택할 미디어가 없습니다.");
@@ -268,7 +320,7 @@ public final class OverlayDownloadService extends Service {
             loadThumbnailInto(image, item.thumbnailUrl);
 
             TextView badge = new TextView(this);
-            badge.setText(item.kind == MediaItem.Kind.VIDEO ? "VIDEO" : String.valueOf(index + 1));
+            badge.setText(item.sharedStory ? "공유" : (item.kind == MediaItem.Kind.VIDEO ? "VIDEO" : String.valueOf(index + 1)));
             badge.setTextSize(11);
             badge.setTextColor(Color.WHITE);
             badge.setGravity(Gravity.CENTER);

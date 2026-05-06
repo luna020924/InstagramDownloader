@@ -34,4 +34,16 @@ final class MediaExtractor {
     static boolean isTwitterUrl(String sharedUrl) {
         return TwitterExtractor.isTwitterUrl(sharedUrl);
     }
+
+    static boolean isInstagramStoryUrl(String sharedUrl) {
+        return !TwitterExtractor.isTwitterUrl(sharedUrl) && InstagramExtractor.isStoryUrl(sharedUrl);
+    }
+
+    static boolean shouldAskStoryScope(String sharedUrl, List<MediaItem> items) {
+        return isInstagramStoryUrl(sharedUrl) && InstagramExtractor.hasOtherStoryItems(items);
+    }
+
+    static List<MediaItem> sharedStoryItemsOnly(List<MediaItem> items) {
+        return InstagramExtractor.sharedStoryItemsOnly(items);
+    }
 }

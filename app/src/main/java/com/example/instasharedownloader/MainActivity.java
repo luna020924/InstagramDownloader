@@ -359,7 +359,7 @@ public final class MainActivity extends Activity {
         executor.execute(() -> {
             try {
                 List<MediaItem> items = MediaExtractor.extract(sharedUrl);
-                mainHandler.post(() -> showSelectionDialog(items));
+                mainHandler.post(() -> showExtractedItems(sharedUrl, items));
             } catch (IOException e) {
                 if (shouldRenderWithWebView(e, sharedUrl)) {
                     postLog("HTTP 추출 실패: " + e.getMessage());
@@ -450,6 +450,88 @@ public final class MainActivity extends Activity {
         webView.loadUrl(instagramUrl);
     }
 
+    private void showExtractedItems(String sharedUrl, List<MediaItem> items) {
+        if (MediaExtractor.shouldAskStoryScope(sharedUrl, items)) {
+            showStoryScopeDialog(items);
+        } else {
+            showSelectionDialog(items);
+        }
+    }
+
+    private void showStoryScopeDialog(List<MediaItem> items) {
+        if (items == null || items.isEmpty()) {
+            appendLog("선택할 스토리가 없습니다.");
+            setIdle();
+            return;
+        }
+
+        appendLog("스토리 " + items.size() + "개 발견. 저장 범위를 선택합니다.");
+
+        Dialog dialog = new Dialog(this);
+        boolean[] handled = {false};
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18), dp(16), dp(18), dp(14));
+        root.setBackground(Ui.roundedStroke(this, Ui.SURFACE, 24, Ui.LINE, 1));
+
+        root.addView(Ui.text(this, "스토리 저장 범위", 20, Ui.TEXT, true));
+
+        TextView body = Ui.text(
+                this,
+                "공유받은 스토리만 저장할지, 이 계정의 현재 다른 스토리까지 함께 볼지 선택하세요.",
+                14,
+                Ui.MUTED,
+                false);
+        body.setPadding(0, dp(8), 0, dp(12));
+        root.addView(body);
+
+        int sharedCount = MediaExtractor.sharedStoryItemsOnly(items).size();
+        TextView count = Ui.chip(this, "공유 " + sharedCount + "개 / 전체 " + items.size() + "개", Ui.BRAND_DARK, Color.rgb(230, 242, 247));
+        LinearLayout.LayoutParams countParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        countParams.setMargins(0, 0, 0, dp(14));
+        root.addView(count, countParams);
+
+        Button sharedOnly = new Button(this);
+        sharedOnly.setText("이 스토리만");
+        Ui.stylePrimary(sharedOnly);
+        sharedOnly.setOnClickListener(v -> {
+            handled[0] = true;
+            dialog.dismiss();
+            showSelectionDialog(MediaExtractor.sharedStoryItemsOnly(items));
+        });
+        root.addView(sharedOnly, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(50)));
+
+        Button allStories = new Button(this);
+        allStories.setText("다른 스토리도 보기");
+        Ui.styleSecondary(allStories);
+        allStories.setOnClickListener(v -> {
+            handled[0] = true;
+            dialog.dismiss();
+            showSelectionDialog(items);
+        });
+        LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(50));
+        allParams.setMargins(0, dp(8), 0, 0);
+        root.addView(allStories, allParams);
+
+        dialog.setContentView(root);
+        dialog.setOnDismissListener(d -> {
+            if (!handled[0]) setIdle();
+        });
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
     private void showSelectionDialog(List<MediaItem> items) {
         if (items == null || items.isEmpty()) {
             appendLog("선택할 미디어가 없습니다.");
@@ -498,7 +580,7 @@ public final class MainActivity extends Activity {
             loadThumbnailInto(image, item.thumbnailUrl);
 
             TextView badge = new TextView(this);
-            badge.setText(item.kind == MediaItem.Kind.VIDEO ? "VIDEO" : String.valueOf(index + 1));
+            badge.setText(item.sharedStory ? "공유" : (item.kind == MediaItem.Kind.VIDEO ? "VIDEO" : String.valueOf(index + 1)));
             badge.setTextSize(11);
             badge.setTextColor(Color.WHITE);
             badge.setGravity(Gravity.CENTER);

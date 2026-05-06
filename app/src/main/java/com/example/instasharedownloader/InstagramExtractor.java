@@ -188,34 +188,53 @@ final class InstagramExtractor {
             if (request.highlight) {
                 String endpoint = "https://www.instagram.com/api/v1/feed/reels_media/?reel_ids=highlight%3A"
                         + urlEncode(request.reelId);
-                String body = fetchApi(endpoint, pageUrl, cookie);
-                return parseStoryMedia(body, null);
+                return fetchStoryEndpoint(endpoint, pageUrl, cookie, null);
             }
 
             String userId = resolveStoryUserId(pageUrl, request, cookie);
+            List<MediaItem> fullStoryCandidate = new ArrayList<>();
+            if (userId != null) {
+                String endpoint = "https://www.instagram.com/api/v1/feed/user/"
+                        + urlEncode(userId)
+                        + "/story/";
+                List<MediaItem> allStories = fetchStoryEndpoint(endpoint, pageUrl, cookie, request.mediaId, false);
+                if (!allStories.isEmpty()) {
+                    if (request.mediaId == null || hasSharedStory(allStories)) return allStories;
+                    fullStoryCandidate = allStories;
+                }
+
+                endpoint = "https://www.instagram.com/api/v1/feed/reels_media/?reel_ids="
+                        + urlEncode(userId);
+                allStories = fetchStoryEndpoint(endpoint, pageUrl, cookie, request.mediaId, false);
+                if (!allStories.isEmpty()) {
+                    if (request.mediaId == null || hasSharedStory(allStories)) return allStories;
+                    if (fullStoryCandidate.isEmpty()) fullStoryCandidate = allStories;
+                }
+            }
+
             if (userId != null && request.mediaId != null) {
                 String endpoint = "https://www.instagram.com/api/v1/feed/reels_media/?media_id="
                         + urlEncode(request.mediaId)
                         + "&reel_ids="
                         + urlEncode(userId);
-                String body = fetchApi(endpoint, pageUrl, cookie);
-                List<MediaItem> selected = parseStoryMedia(body, request.mediaId);
-                if (!selected.isEmpty()) return selected;
+                List<MediaItem> selected = fetchStoryEndpoint(endpoint, pageUrl, cookie, request.mediaId, true);
+                if (!selected.isEmpty()) {
+                    if (!fullStoryCandidate.isEmpty()) {
+                        List<MediaItem> markedStories = markSharedStoryFromSelection(fullStoryCandidate, selected);
+                        if (hasSharedStory(markedStories)) return markedStories;
+                    }
+                    return selected;
+                }
             }
 
-            if (userId != null) {
-                String endpoint = "https://www.instagram.com/api/v1/feed/user/"
-                        + urlEncode(userId)
-                        + "/story/";
-                String body = fetchApi(endpoint, pageUrl, cookie);
-                return parseStoryMedia(body, request.mediaId);
+            if (!fullStoryCandidate.isEmpty()) {
+                return fullStoryCandidate;
             }
 
             if (request.mediaId != null) {
                 String endpoint = "https://www.instagram.com/api/v1/feed/reels_media/?media_id="
                         + urlEncode(request.mediaId);
-                String body = fetchApi(endpoint, pageUrl, cookie);
-                return parseStoryMedia(body, request.mediaId);
+                return fetchStoryEndpoint(endpoint, pageUrl, cookie, request.mediaId, true);
             }
         } catch (JSONException e) {
             return new ArrayList<>();
@@ -224,7 +243,24 @@ final class InstagramExtractor {
         return new ArrayList<>();
     }
 
+    private static List<MediaItem> fetchStoryEndpoint(String endpoint, String pageUrl, String cookie, String requestedMediaId) throws JSONException {
+        return fetchStoryEndpoint(endpoint, pageUrl, cookie, requestedMediaId, true);
+    }
+
+    private static List<MediaItem> fetchStoryEndpoint(String endpoint, String pageUrl, String cookie, String requestedMediaId, boolean markFirstIfMissing) throws JSONException {
+        try {
+            String body = fetchApi(endpoint, pageUrl, cookie);
+            return parseStoryMedia(body, requestedMediaId, markFirstIfMissing);
+        } catch (IOException e) {
+            return new ArrayList<>();
+        }
+    }
+
     private static List<MediaItem> parseStoryMedia(String json, String requestedMediaId) throws JSONException {
+        return parseStoryMedia(json, requestedMediaId, true);
+    }
+
+    private static List<MediaItem> parseStoryMedia(String json, String requestedMediaId, boolean markFirstIfMissing) throws JSONException {
         JSONObject root = new JSONObject(stripJsonPrefix(json));
         JSONObject reel = firstStoryReel(root);
         if (reel == null) return new ArrayList<>();
@@ -233,32 +269,115 @@ final class InstagramExtractor {
         if (items == null) return new ArrayList<>();
 
         LinkedHashMap<String, MediaItem> all = new LinkedHashMap<>();
-        LinkedHashMap<String, MediaItem> requested = new LinkedHashMap<>();
+        boolean foundRequested = requestedMediaId == null;
         for (int i = 0; i < items.length(); i++) {
             JSONObject item = items.optJSONObject(i);
             if (item == null) continue;
 
-            LinkedHashMap<String, MediaItem> target = storyItemMatches(item, requestedMediaId)
-                    ? requested
-                    : all;
-            collectSingleMedia(item, target);
+            boolean sharedStory = storyItemMatches(item, requestedMediaId);
+            if (sharedStory) foundRequested = true;
+            collectStoryMedia(item, all, sharedStory);
         }
 
-        if (requestedMediaId != null && !requested.isEmpty()) {
-            return new ArrayList<>(requested.values());
-        }
-
-        if (requestedMediaId != null && requested.isEmpty()) {
-            collectAllStoryItems(items, all);
+        if (requestedMediaId != null && markFirstIfMissing && !foundRequested && !all.isEmpty()) {
+            markFirstStoryAsShared(all);
         }
         return new ArrayList<>(all.values());
     }
 
-    private static void collectAllStoryItems(JSONArray items, Map<String, MediaItem> out) {
-        for (int i = 0; i < items.length(); i++) {
-            JSONObject item = items.optJSONObject(i);
-            if (item != null) collectSingleMedia(item, out);
+    private static List<MediaItem> markSharedStoryFromSelection(List<MediaItem> allStories, List<MediaItem> selectedStories) {
+        List<MediaItem> marked = new ArrayList<>();
+        boolean matched = false;
+        for (MediaItem item : allStories) {
+            boolean shared = item.sharedStory || matchesAnyStoryMedia(item, selectedStories);
+            if (shared) matched = true;
+            marked.add(new MediaItem(
+                    item.url,
+                    item.kind,
+                    item.thumbnailUrl,
+                    item.filePrefix,
+                    item.referer,
+                    item.storyItem,
+                    shared));
         }
+        return matched ? marked : allStories;
+    }
+
+    private static boolean matchesAnyStoryMedia(MediaItem item, List<MediaItem> selectedStories) {
+        for (MediaItem selected : selectedStories) {
+            if (sameStoryMedia(item, selected)) return true;
+        }
+        return false;
+    }
+
+    private static boolean sameStoryMedia(MediaItem first, MediaItem second) {
+        return first.url.equals(second.url)
+                || first.thumbnailUrl.equals(second.thumbnailUrl)
+                || first.url.equals(second.thumbnailUrl)
+                || first.thumbnailUrl.equals(second.url);
+    }
+
+    private static void collectStoryMedia(JSONObject media, Map<String, MediaItem> out, boolean sharedStory) {
+        boolean hasMusicSticker = media.optJSONArray("story_music_stickers") != null
+                || media.optJSONObject("story_music_stickers") != null;
+        if (hasMusicSticker && media.optInt("media_type", 0) != 1) {
+            JSONObject versions = media.optJSONObject("image_versions2");
+            JSONArray imageCandidates = versions == null ? null : versions.optJSONArray("candidates");
+            String image = bestImageUrl(imageCandidates);
+            String thumbnail = thumbnailImageUrl(imageCandidates);
+            if (image != null) {
+                add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, true, sharedStory);
+            }
+        }
+        collectSingleMedia(media, out, true, sharedStory);
+    }
+
+    private static void markFirstStoryAsShared(LinkedHashMap<String, MediaItem> out) {
+        if (out.isEmpty()) return;
+        String firstKey = out.keySet().iterator().next();
+        MediaItem item = out.get(firstKey);
+        if (item == null) return;
+        out.put(firstKey, new MediaItem(
+                item.url,
+                item.kind,
+                item.thumbnailUrl,
+                item.filePrefix,
+                item.referer,
+                true,
+                true));
+    }
+
+    static boolean isStoryUrl(String url) {
+        return storyRequestFromUrl(normalizeUrl(url)) != null;
+    }
+
+    static boolean hasSharedStory(List<MediaItem> items) {
+        for (MediaItem item : items) {
+            if (item.storyItem && item.sharedStory) return true;
+        }
+        return false;
+    }
+
+    static boolean hasOtherStoryItems(List<MediaItem> items) {
+        boolean hasShared = false;
+        boolean hasOther = false;
+        for (MediaItem item : items) {
+            if (!item.storyItem) continue;
+            if (item.sharedStory) {
+                hasShared = true;
+            } else {
+                hasOther = true;
+            }
+        }
+        return hasShared && hasOther;
+    }
+
+    static List<MediaItem> sharedStoryItemsOnly(List<MediaItem> items) {
+        List<MediaItem> filtered = new ArrayList<>();
+        for (MediaItem item : items) {
+            if (item.sharedStory) filtered.add(item);
+        }
+        return filtered.isEmpty() ? items : filtered;
     }
 
     private static JSONObject firstStoryReel(JSONObject root) {
@@ -347,18 +466,22 @@ final class InstagramExtractor {
     }
 
     private static void collectSingleMedia(JSONObject media, Map<String, MediaItem> out) {
+        collectSingleMedia(media, out, false, false);
+    }
+
+    private static void collectSingleMedia(JSONObject media, Map<String, MediaItem> out, boolean storyItem, boolean sharedStory) {
         JSONObject versions = media.optJSONObject("image_versions2");
         JSONArray imageCandidates = versions == null ? null : versions.optJSONArray("candidates");
         String image = bestImageUrl(imageCandidates);
         String thumbnail = thumbnailImageUrl(imageCandidates);
         String video = bestVideoUrl(media.optJSONArray("video_versions"));
         if (video != null) {
-            add(out, video, MediaItem.Kind.VIDEO, thumbnail == null ? image : thumbnail);
+            add(out, video, MediaItem.Kind.VIDEO, thumbnail == null ? image : thumbnail, storyItem, sharedStory);
             return;
         }
 
         if (image != null) {
-            add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail);
+            add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, storyItem, sharedStory);
         }
     }
 
@@ -544,13 +667,24 @@ final class InstagramExtractor {
     }
 
     private static void add(Map<String, MediaItem> out, String url, MediaItem.Kind kind, String thumbnailUrl) {
+        add(out, url, kind, thumbnailUrl, false, false);
+    }
+
+    private static void add(Map<String, MediaItem> out, String url, MediaItem.Kind kind, String thumbnailUrl, boolean storyItem, boolean sharedStory) {
         url = cleanupMediaUrl(url);
         if (!looksLikeMediaUrl(url)) return;
         thumbnailUrl = cleanupMediaUrl(thumbnailUrl);
         if (!looksLikeMediaUrl(thumbnailUrl)) thumbnailUrl = url;
 
         String dedupeKey = url.replaceAll("[?&](_nc_ht|_nc_cat|ccb|oh|oe|dl|stp|efg|_nc_sid|_nc_ohc)=[^&]+", "");
-        out.putIfAbsent(dedupeKey, new MediaItem(url, kind, thumbnailUrl));
+        out.putIfAbsent(dedupeKey, new MediaItem(
+                url,
+                kind,
+                thumbnailUrl,
+                "instagram",
+                "https://www.instagram.com/",
+                storyItem,
+                sharedStory));
     }
 
     private static boolean looksLoginOnly(String html) {
