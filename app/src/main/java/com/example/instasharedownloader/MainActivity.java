@@ -352,6 +352,7 @@ public final class MainActivity extends Activity {
         loginButton.setEnabled(false);
         logView.setText("");
         appendLog("분석 시작: " + sharedUrl);
+        InstagramExtractor.updateSessionCookie(CookieManager.getInstance().getCookie("https://www.instagram.com/"));
         if (!MediaExtractor.isTwitterUrl(sharedUrl) && !hasInstagramSession()) {
             appendLog("앱 내부 Instagram 로그인 세션이 없습니다. 실패하면 Instagram 로그인 버튼으로 먼저 로그인하세요.");
         }

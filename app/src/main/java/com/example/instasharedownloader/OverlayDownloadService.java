@@ -104,6 +104,7 @@ public final class OverlayDownloadService extends Service {
 
     private void startExtraction(String instagramUrl) {
         appendStatus("분석 시작: " + instagramUrl);
+        InstagramExtractor.updateSessionCookie(CookieManager.getInstance().getCookie("https://www.instagram.com/"));
         if (!MediaExtractor.isTwitterUrl(instagramUrl) && !hasInstagramSession()) {
             appendStatus("Instagram 로그인 세션이 없으면 일부 게시물은 실패할 수 있습니다.");
         }

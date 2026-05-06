@@ -26,9 +26,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class InstagramExtractor {
+    private static final String INSTAGRAM_ORIGIN = "https://www.instagram.com/";
     private static final String USER_AGENT =
             "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36";
+    private static volatile String sessionCookieOverride;
 
     private static final Pattern META_TAG = Pattern.compile(
             "<meta\\s+[^>]*(?:property|name)=[\"']([^\"']+)[\"'][^>]*content=[\"']([^\"']+)[\"'][^>]*>|"
@@ -53,6 +55,20 @@ final class InstagramExtractor {
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
     private InstagramExtractor() {
+    }
+
+    static void updateSessionCookie(String cookie) {
+        if (cookie != null && !cookie.isEmpty()) {
+            sessionCookieOverride = cookie;
+        }
+    }
+
+    private static String instagramCookie() {
+        String cookie = CookieManager.getInstance().getCookie(INSTAGRAM_ORIGIN);
+        if (cookie == null || cookie.isEmpty()) {
+            cookie = sessionCookieOverride;
+        }
+        return cookie;
     }
 
     static String extractInstagramUrl(String input) {
@@ -164,7 +180,7 @@ final class InstagramExtractor {
     private static List<MediaItem> tryExtractFromMediaInfoApi(String pageUrl) {
         String shortcode = shortcodeFromUrl(pageUrl);
         String mediaId = mediaIdFromShortcode(shortcode);
-        String cookie = CookieManager.getInstance().getCookie("https://www.instagram.com/");
+        String cookie = instagramCookie();
         if (mediaId == null || cookie == null || !cookie.contains("sessionid=")) {
             return new ArrayList<>();
         }
@@ -179,7 +195,7 @@ final class InstagramExtractor {
     }
 
     private static List<MediaItem> tryExtractStoryMedia(String pageUrl, StoryRequest request) throws IOException {
-        String cookie = CookieManager.getInstance().getCookie("https://www.instagram.com/");
+        String cookie = instagramCookie();
         if (cookie == null || !cookie.contains("sessionid=")) {
             throw new IOException("Instagram login is required for story links.");
         }
@@ -318,17 +334,6 @@ final class InstagramExtractor {
     }
 
     private static void collectStoryMedia(JSONObject media, Map<String, MediaItem> out, boolean sharedStory) {
-        boolean hasMusicSticker = media.optJSONArray("story_music_stickers") != null
-                || media.optJSONObject("story_music_stickers") != null;
-        if (hasMusicSticker && media.optInt("media_type", 0) != 1) {
-            JSONObject versions = media.optJSONObject("image_versions2");
-            JSONArray imageCandidates = versions == null ? null : versions.optJSONArray("candidates");
-            String image = bestImageUrl(imageCandidates);
-            String thumbnail = thumbnailImageUrl(imageCandidates);
-            if (image != null) {
-                add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, true, sharedStory);
-            }
-        }
         collectSingleMedia(media, out, true, sharedStory);
     }
 
@@ -411,31 +416,71 @@ final class InstagramExtractor {
 
     private static String resolveStoryUserId(String pageUrl, StoryRequest request, String cookie) {
         String userId = null;
+
+        if (request.username != null) {
+            userId = resolveReelsTrayUserId(request.username, pageUrl, cookie);
+            if (userId == null || userId.isEmpty()) {
+                String endpoint = "https://www.instagram.com/api/v1/users/web_profile_info/?username="
+                        + urlEncode(request.username);
+                userId = resolveProfileUserId(endpoint, pageUrl, cookie);
+            }
+            if (userId == null || userId.isEmpty()) {
+                String endpoint = "https://www.instagram.com/api/v1/users/web_profile_info/?username="
+                        + urlEncode(request.username);
+                userId = resolveProfileUserId(endpoint, pageUrl, null);
+            }
+            if (userId != null && !userId.isEmpty()) return userId;
+        }
+
         try {
             String html = fetch(pageUrl);
             userId = firstMatch(html,
                     "StoriesPage_(\\d+)",
-                    "\"user_id\"\\s*:\\s*\"(\\d+)\"",
                     "\"owner\"\\s*:\\s*\\{[^}]*\"id\"\\s*:\\s*\"(\\d+)\"");
         } catch (IOException ignored) {
         }
 
-        if (userId != null || request.username == null) return userId;
+        return userId;
+    }
 
+    private static String resolveReelsTrayUserId(String username, String pageUrl, String cookie) {
+        if (cookie == null || cookie.isEmpty()) return null;
         try {
-            String endpoint = "https://www.instagram.com/api/v1/users/web_profile_info/?username="
-                    + urlEncode(request.username);
+            String body = fetchApi("https://www.instagram.com/api/v1/feed/reels_tray/", pageUrl, cookie);
+            JSONObject root = new JSONObject(stripJsonPrefix(body));
+            JSONArray tray = root.optJSONArray("tray");
+            if (tray == null) return null;
+
+            for (int i = 0; i < tray.length(); i++) {
+                JSONObject reel = tray.optJSONObject(i);
+                if (reel == null) continue;
+                JSONObject user = reel.optJSONObject("user");
+                String reelUsername = user == null ? null : user.optString("username", null);
+                if (reelUsername == null || !reelUsername.equalsIgnoreCase(username)) continue;
+
+                String userId = reel.optString("id", null);
+                if (userId == null || userId.isEmpty()) userId = user.optString("pk", null);
+                if (userId == null || userId.isEmpty()) userId = user.optString("id", null);
+                return userId == null || userId.isEmpty() ? null : userId;
+            }
+        } catch (IOException | JSONException e) {
+        }
+        return null;
+    }
+
+    private static String resolveProfileUserId(String endpoint, String pageUrl, String cookie) {
+        try {
             String body = fetchApi(endpoint, pageUrl, cookie);
             JSONObject root = new JSONObject(stripJsonPrefix(body));
             JSONObject data = root.optJSONObject("data");
             JSONObject user = data == null ? null : data.optJSONObject("user");
-            if (user != null) {
-                userId = user.optString("id", null);
-                if (userId == null || userId.isEmpty()) userId = user.optString("pk", null);
-            }
-        } catch (IOException | JSONException ignored) {
+            if (user == null) return null;
+            String userId = user.optString("id", null);
+            if (userId == null || userId.isEmpty()) userId = user.optString("pk", null);
+            return userId == null || userId.isEmpty() ? null : userId;
+        } catch (IOException | JSONException e) {
+            return null;
         }
-        return userId;
     }
 
     private static List<MediaItem> parseMediaInfo(String json) throws JSONException {
@@ -702,7 +747,7 @@ final class InstagramExtractor {
         connection.setRequestProperty("User-Agent", USER_AGENT);
         connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
         connection.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7");
-        String cookie = CookieManager.getInstance().getCookie("https://www.instagram.com/");
+        String cookie = instagramCookie();
         if (cookie != null && !cookie.isEmpty()) {
             connection.setRequestProperty("Cookie", cookie);
         }
@@ -728,14 +773,16 @@ final class InstagramExtractor {
         connection.setRequestProperty("Accept", "application/json,text/plain,*/*");
         connection.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7");
         connection.setRequestProperty("Referer", referer);
-        connection.setRequestProperty("Cookie", cookie);
         connection.setRequestProperty("X-IG-App-ID", "1217981644879628");
         connection.setRequestProperty("X-ASBD-ID", "129477");
         connection.setRequestProperty("X-IG-WWW-Claim", "0");
         connection.setRequestProperty("X-Requested-With", "XMLHttpRequest");
-        String csrf = cookieValue(cookie, "csrftoken");
-        if (csrf != null) {
-            connection.setRequestProperty("X-CSRFToken", csrf);
+        if (cookie != null && !cookie.isEmpty()) {
+            connection.setRequestProperty("Cookie", cookie);
+            String csrf = cookieValue(cookie, "csrftoken");
+            if (csrf != null) {
+                connection.setRequestProperty("X-CSRFToken", csrf);
+            }
         }
 
         int code = connection.getResponseCode();
