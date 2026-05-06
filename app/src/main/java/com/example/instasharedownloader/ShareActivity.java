@@ -66,9 +66,9 @@ public final class ShareActivity extends Activity {
             if (data != null) candidate = data.toString();
         }
 
-        pendingUrl = InstagramExtractor.extractInstagramUrl(candidate);
+        pendingUrl = MediaExtractor.extractSupportedUrl(candidate);
         if (pendingUrl == null) {
-            showMessage("Instagram 링크를 찾지 못했습니다.", "닫기", this::finish);
+            showMessage("Instagram 또는 Twitter/X 링크를 찾지 못했습니다.", "닫기", this::finish);
             return;
         }
 
@@ -126,7 +126,7 @@ public final class ShareActivity extends Activity {
     }
 
     private void showMessage(String message, String action, Runnable callback) {
-        LinearLayout root = buildPanel("Instagram 공유 다운로드", message);
+        LinearLayout root = buildPanel("SNS 공유 다운로드", message);
         Button button = new Button(this);
         button.setText(action);
         Ui.stylePrimary(button);

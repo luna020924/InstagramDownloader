@@ -150,7 +150,7 @@ public final class MainActivity extends Activity {
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
 
-        TextView eyebrow = Ui.text(this, "INSTA SHARE", 12, Ui.BRAND, true);
+        TextView eyebrow = Ui.text(this, "SHARE SAVE", 12, Ui.BRAND, true);
         root.addView(eyebrow);
 
         TextView title = Ui.text(this, getString(R.string.main_title), 28, Ui.TEXT, true);
@@ -177,7 +177,7 @@ public final class MainActivity extends Activity {
         addTopMargin(root, setupCard, 16);
         setupCard.addView(Ui.text(this, "공유 다운로드 준비", 18, Ui.TEXT, true));
 
-        TextView setupBody = Ui.text(this, "Instagram 세션과 오버레이 권한을 준비하면 공유 화면 위에서 바로 선택하고 저장할 수 있습니다.", 14, Ui.MUTED, false);
+        TextView setupBody = Ui.text(this, "Instagram 세션과 오버레이 권한을 준비하면 공유 화면 위에서 바로 선택하고 저장할 수 있습니다. Twitter/X 공개 게시물은 로그인 없이 처리합니다.", 14, Ui.MUTED, false);
         setupBody.setPadding(0, dp(6), 0, dp(12));
         setupCard.addView(setupBody);
 
@@ -326,21 +326,21 @@ public final class MainActivity extends Activity {
             if (data != null) candidate = data.toString();
         }
 
-        String instagramUrl = InstagramExtractor.extractInstagramUrl(candidate);
-        if (instagramUrl != null) {
-            urlField.setText(instagramUrl);
-            appendLog("공유 링크 감지: " + instagramUrl);
-            startDownload(instagramUrl);
+        String sharedUrl = MediaExtractor.extractSupportedUrl(candidate);
+        if (sharedUrl != null) {
+            urlField.setText(sharedUrl);
+            appendLog("공유 링크 감지: " + sharedUrl);
+            startDownload(sharedUrl);
         }
     }
 
     private void startDownload(String rawInput) {
-        String instagramUrl = InstagramExtractor.extractInstagramUrl(rawInput);
-        if (instagramUrl == null) {
-            appendLog("Instagram 링크를 찾지 못했습니다.");
+        String sharedUrl = MediaExtractor.extractSupportedUrl(rawInput);
+        if (sharedUrl == null) {
+            appendLog("Instagram 또는 Twitter/X 링크를 찾지 못했습니다.");
             return;
         }
-        pendingUrl = instagramUrl;
+        pendingUrl = sharedUrl;
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
                 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
@@ -351,20 +351,20 @@ public final class MainActivity extends Activity {
         downloadButton.setEnabled(false);
         loginButton.setEnabled(false);
         logView.setText("");
-        appendLog("분석 시작: " + instagramUrl);
-        if (!hasInstagramSession()) {
+        appendLog("분석 시작: " + sharedUrl);
+        if (!MediaExtractor.isTwitterUrl(sharedUrl) && !hasInstagramSession()) {
             appendLog("앱 내부 Instagram 로그인 세션이 없습니다. 실패하면 Instagram 로그인 버튼으로 먼저 로그인하세요.");
         }
 
         executor.execute(() -> {
             try {
-                List<MediaItem> items = InstagramExtractor.extract(instagramUrl);
+                List<MediaItem> items = MediaExtractor.extract(sharedUrl);
                 mainHandler.post(() -> showSelectionDialog(items));
             } catch (IOException e) {
-                if (shouldRenderWithWebView(e)) {
+                if (shouldRenderWithWebView(e, sharedUrl)) {
                     postLog("HTTP 추출 실패: " + e.getMessage());
                     postLog("저장된 Instagram 세션으로 페이지를 렌더링해서 다시 찾는 중");
-                    mainHandler.post(() -> extractWithRenderedWebView(instagramUrl));
+                    mainHandler.post(() -> extractWithRenderedWebView(sharedUrl));
                 } else {
                     postFailure(e);
                     mainHandler.post(this::setIdle);
@@ -376,13 +376,8 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private boolean shouldRenderWithWebView(IOException e) {
-        String message = e.getMessage();
-        return message != null
-                && (message.contains("No downloadable")
-                || message.contains("login is required")
-                || message.contains("HTTP 401")
-                || message.contains("HTTP 403"));
+    private boolean shouldRenderWithWebView(IOException e, String sharedUrl) {
+        return MediaExtractor.shouldRenderWithInstagramWebView(e, sharedUrl);
     }
 
     private void extractWithRenderedWebView(String instagramUrl) {
@@ -660,7 +655,9 @@ public final class MainActivity extends Activity {
 
     private void postFailure(IOException e) {
         postLog("실패: " + e.getMessage());
-        postLog("Scriptable 방식처럼 앱 내부 Instagram 로그인 세션이 필요할 수 있습니다.");
+        if (pendingUrl == null || !MediaExtractor.isTwitterUrl(pendingUrl)) {
+            postLog("Scriptable 방식처럼 앱 내부 Instagram 로그인 세션이 필요할 수 있습니다.");
+        }
     }
 
     private boolean hasInstagramSession() {

@@ -35,7 +35,7 @@ final class MediaStoreSaver {
         connection.setReadTimeout(60000);
         connection.setInstanceFollowRedirects(true);
         connection.setRequestProperty("User-Agent", USER_AGENT);
-        connection.setRequestProperty("Referer", "https://www.instagram.com/");
+        connection.setRequestProperty("Referer", item.referer);
 
         int code = connection.getResponseCode();
         if (code >= 400) {
@@ -45,7 +45,7 @@ final class MediaStoreSaver {
         String contentType = connection.getContentType();
         String extension = extensionFor(item, contentType, item.url);
         String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        String displayName = String.format(Locale.US, "instagram_%s_%02d%s", stamp, index, extension);
+        String displayName = String.format(Locale.US, "%s_%s_%02d%s", item.filePrefix, stamp, index, extension);
 
         ContentResolver resolver = context.getContentResolver();
         Uri collection = collectionFor(item);

@@ -83,7 +83,7 @@ public final class OverlayDownloadService extends Service {
             return START_NOT_STICKY;
         }
 
-        showProgressOverlay("Instagram 공유 다운로드", "공유 링크를 분석하는 중입니다.");
+        showProgressOverlay("SNS 공유 다운로드", "공유 링크를 분석하는 중입니다.");
         startExtraction(instagramUrl);
         return START_NOT_STICKY;
     }
@@ -104,23 +104,25 @@ public final class OverlayDownloadService extends Service {
 
     private void startExtraction(String instagramUrl) {
         appendStatus("분석 시작: " + instagramUrl);
-        if (!hasInstagramSession()) {
+        if (!MediaExtractor.isTwitterUrl(instagramUrl) && !hasInstagramSession()) {
             appendStatus("Instagram 로그인 세션이 없으면 일부 게시물은 실패할 수 있습니다.");
         }
 
         executor.execute(() -> {
             try {
-                List<MediaItem> items = InstagramExtractor.extract(instagramUrl);
+                List<MediaItem> items = MediaExtractor.extract(instagramUrl);
                 mainHandler.post(() -> showSelectionOverlay(items));
             } catch (IOException e) {
-                if (shouldRenderWithWebView(e)) {
+                if (shouldRenderWithWebView(e, instagramUrl)) {
                     postStatus("HTTP 추출 실패: " + e.getMessage());
                     postStatus("저장된 Instagram 세션으로 페이지를 렌더링합니다.");
                     mainHandler.post(() -> extractWithRenderedWebView(instagramUrl));
                 } else {
                     mainHandler.post(() -> showDoneOverlay(
                             "다운로드 실패",
-                            "실패: " + e.getMessage() + "\nInstagram 로그인 세션이 필요할 수 있습니다."));
+                            MediaExtractor.isTwitterUrl(instagramUrl)
+                                    ? "실패: " + e.getMessage()
+                                    : "실패: " + e.getMessage() + "\nInstagram 로그인 세션이 필요할 수 있습니다."));
                 }
             } catch (Exception e) {
                 mainHandler.post(() -> showDoneOverlay(
@@ -130,13 +132,8 @@ public final class OverlayDownloadService extends Service {
         });
     }
 
-    private boolean shouldRenderWithWebView(IOException e) {
-        String message = e.getMessage();
-        return message != null
-                && (message.contains("No downloadable")
-                || message.contains("login is required")
-                || message.contains("HTTP 401")
-                || message.contains("HTTP 403"));
+    private boolean shouldRenderWithWebView(IOException e, String sharedUrl) {
+        return MediaExtractor.shouldRenderWithInstagramWebView(e, sharedUrl);
     }
 
     private void extractWithRenderedWebView(String instagramUrl) {
@@ -632,7 +629,7 @@ public final class OverlayDownloadService extends Service {
                 openIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("Instagram 공유 다운로드")
+                .setContentTitle("SNS 공유 다운로드")
                 .setContentText(text)
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentIntent(pendingIntent)
