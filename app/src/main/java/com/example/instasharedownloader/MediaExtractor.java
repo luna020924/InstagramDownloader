@@ -43,6 +43,10 @@ final class MediaExtractor {
         return isInstagramStoryUrl(sharedUrl) && InstagramExtractor.hasOtherStoryItems(items);
     }
 
+    static boolean shouldDownloadDirectly(List<MediaItem> items) {
+        return items != null && items.size() == 1;
+    }
+
     static List<MediaItem> sharedStoryItemsOnly(List<MediaItem> items) {
         return InstagramExtractor.sharedStoryItemsOnly(items);
     }

@@ -200,6 +200,9 @@ public final class OverlayDownloadService extends Service {
     private void showExtractedItems(String sharedUrl, List<MediaItem> items) {
         if (MediaExtractor.shouldAskStoryScope(sharedUrl, items)) {
             showStoryScopeOverlay(items);
+        } else if (MediaExtractor.shouldDownloadDirectly(items)) {
+            showProgressOverlay("다운로드 중", "다운로드 중입니다. (1개)");
+            startSelectedDownload(items);
         } else {
             showSelectionOverlay(items);
         }

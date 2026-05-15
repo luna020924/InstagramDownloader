@@ -448,6 +448,9 @@ public final class MainActivity extends Activity {
     private void showExtractedItems(String sharedUrl, List<MediaItem> items) {
         if (MediaExtractor.shouldAskStoryScope(sharedUrl, items)) {
             showStoryScopeDialog(items);
+        } else if (MediaExtractor.shouldDownloadDirectly(items)) {
+            setLog("다운로드 중... (1개)");
+            startSelectedDownload(items);
         } else {
             showSelectionDialog(items);
         }
