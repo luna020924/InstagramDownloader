@@ -8,9 +8,13 @@ import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
@@ -32,60 +36,95 @@ final class MediaStoreSaver {
     static String download(Context context, MediaItem item, int index, int total, Progress progress) throws IOException {
         long savedAtMillis = System.currentTimeMillis();
         long savedAtSeconds = savedAtMillis / 1000L;
-        HttpURLConnection connection = (HttpURLConnection) new URL(item.url).openConnection();
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(60000);
-        connection.setInstanceFollowRedirects(true);
-        connection.setRequestProperty("User-Agent", USER_AGENT);
-        connection.setRequestProperty("Referer", item.referer);
-
-        int code = connection.getResponseCode();
-        if (code >= 400) {
-            throw new IOException("Media returned HTTP " + code);
-        }
-
-        String contentType = connection.getContentType();
-        String extension = extensionFor(item, contentType, item.url);
-        String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        String displayName = String.format(Locale.US, "%s_%s_%02d%s", item.filePrefix, stamp, index, extension);
-
+        HttpURLConnection connection = null;
+        File tempFile = null;
+        Uri destination = null;
+        InputStream source = null;
         ContentResolver resolver = context.getContentResolver();
-        Uri collection = collectionFor(item);
-        ContentValues values = new ContentValues();
-        values.put(MediaStore.MediaColumns.DISPLAY_NAME, displayName);
-        values.put(MediaStore.MediaColumns.MIME_TYPE, mimeFor(item, contentType, extension));
-        putDownloadTimestamps(values, item, savedAtMillis, savedAtSeconds, true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePathFor(item));
-            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
-        }
+        try {
+            connection = (HttpURLConnection) new URL(item.url).openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(60000);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("Referer", item.referer);
 
-        Uri destination = resolver.insert(collection, values);
-        if (destination == null) {
-            throw new IOException("Could not create MediaStore item.");
-        }
-
-        try (InputStream input = connection.getInputStream();
-             OutputStream output = resolver.openOutputStream(destination)) {
-            if (output == null) throw new IOException("Could not open destination stream.");
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                output.write(buffer, 0, read);
+            int code = connection.getResponseCode();
+            if (code >= 400) {
+                throw new IOException("Media returned HTTP " + code);
             }
-        } catch (IOException e) {
-            resolver.delete(destination, null, null);
-            throw e;
-        }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ContentValues done = new ContentValues();
-            done.put(MediaStore.MediaColumns.IS_PENDING, 0);
-            resolver.update(destination, done, null, null);
-        }
-        updateDownloadTimestampBestEffort(resolver, destination, item, savedAtMillis, savedAtSeconds);
+            String contentType = connection.getContentType();
+            String extension = extensionFor(item, contentType, item.url);
+            String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+            String displayName = String.format(Locale.US, "%s_%s_%02d%s", item.filePrefix, stamp, index, extension);
 
-        return displayName;
+            if (item.kind == MediaItem.Kind.VIDEO && ".mp4".equals(extension)) {
+                tempFile = File.createTempFile("insta_share_video_", ".mp4", context.getCacheDir());
+                try (InputStream input = connection.getInputStream();
+                     OutputStream output = new FileOutputStream(tempFile)) {
+                    copy(input, output);
+                }
+                patchMp4DownloadTimestamp(tempFile, savedAtMillis);
+                source = new FileInputStream(tempFile);
+            } else {
+                source = connection.getInputStream();
+            }
+
+            Uri collection = collectionFor(item);
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, displayName);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mimeFor(item, contentType, extension));
+            putDownloadTimestamps(values, item, savedAtMillis, savedAtSeconds, true);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePathFor(item));
+                values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            }
+
+            destination = resolver.insert(collection, values);
+            if (destination == null) {
+                throw new IOException("Could not create MediaStore item.");
+            }
+
+            try (InputStream input = source;
+                 OutputStream output = resolver.openOutputStream(destination)) {
+                source = null;
+                if (output == null) throw new IOException("Could not open destination stream.");
+                copy(input, output);
+            } catch (IOException e) {
+                resolver.delete(destination, null, null);
+                throw e;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues done = new ContentValues();
+                done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                resolver.update(destination, done, null, null);
+            }
+            updateDownloadTimestampBestEffort(resolver, destination, item, savedAtMillis, savedAtSeconds);
+
+            return displayName;
+        } finally {
+            if (source != null) {
+                try {
+                    source.close();
+                } catch (IOException ignored) {
+                }
+            }
+            if (connection != null) connection.disconnect();
+            if (tempFile != null && tempFile.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                tempFile.delete();
+            }
+        }
+    }
+
+    private static void copy(InputStream input, OutputStream output) throws IOException {
+        byte[] buffer = new byte[64 * 1024];
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
     }
 
     private static void putDownloadTimestamps(
@@ -118,6 +157,95 @@ final class MediaStoreSaver {
         } catch (RuntimeException ignored) {
             // Some gallery providers reject date updates; the inserted values above still cover normal MediaStore.
         }
+    }
+
+    private static void patchMp4DownloadTimestamp(File file, long millis) {
+        long quickTimeSeconds = millis / 1000L + 2082844800L;
+        try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
+            patchMp4Boxes(raf, 0, raf.length(), quickTimeSeconds);
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void patchMp4Boxes(RandomAccessFile raf, long start, long end, long quickTimeSeconds) throws IOException {
+        long position = start;
+        while (position + 8 <= end) {
+            raf.seek(position);
+            long size = readUInt32(raf);
+            String type = readType(raf);
+            long headerSize = 8;
+
+            if (size == 1) {
+                if (position + 16 > end) return;
+                size = readUInt64(raf);
+                headerSize = 16;
+            } else if (size == 0) {
+                size = end - position;
+            }
+
+            if (size < headerSize || position + size > end) return;
+
+            long payloadStart = position + headerSize;
+            long boxEnd = position + size;
+            if ("mvhd".equals(type) || "tkhd".equals(type) || "mdhd".equals(type)) {
+                patchMp4FullBoxTimestamp(raf, payloadStart, boxEnd, quickTimeSeconds);
+            } else if (isMp4Container(type)) {
+                patchMp4Boxes(raf, payloadStart, boxEnd, quickTimeSeconds);
+            }
+            position += size;
+        }
+    }
+
+    private static void patchMp4FullBoxTimestamp(RandomAccessFile raf, long payloadStart, long boxEnd, long quickTimeSeconds) throws IOException {
+        if (payloadStart + 12 > boxEnd) return;
+        raf.seek(payloadStart);
+        int version = raf.readUnsignedByte();
+        if (version == 1) {
+            if (payloadStart + 20 > boxEnd) return;
+            raf.seek(payloadStart + 4);
+            writeUInt64(raf, quickTimeSeconds);
+            writeUInt64(raf, quickTimeSeconds);
+        } else {
+            if (payloadStart + 12 > boxEnd) return;
+            raf.seek(payloadStart + 4);
+            writeUInt32(raf, quickTimeSeconds);
+            writeUInt32(raf, quickTimeSeconds);
+        }
+    }
+
+    private static boolean isMp4Container(String type) {
+        return "moov".equals(type) || "trak".equals(type) || "mdia".equals(type);
+    }
+
+    private static long readUInt32(RandomAccessFile raf) throws IOException {
+        return ((long) raf.readUnsignedByte() << 24)
+                | ((long) raf.readUnsignedByte() << 16)
+                | ((long) raf.readUnsignedByte() << 8)
+                | raf.readUnsignedByte();
+    }
+
+    private static long readUInt64(RandomAccessFile raf) throws IOException {
+        long high = readUInt32(raf);
+        long low = readUInt32(raf);
+        return (high << 32) | low;
+    }
+
+    private static String readType(RandomAccessFile raf) throws IOException {
+        byte[] bytes = new byte[4];
+        raf.readFully(bytes);
+        return new String(bytes, java.nio.charset.StandardCharsets.US_ASCII);
+    }
+
+    private static void writeUInt32(RandomAccessFile raf, long value) throws IOException {
+        raf.write((int) ((value >> 24) & 0xff));
+        raf.write((int) ((value >> 16) & 0xff));
+        raf.write((int) ((value >> 8) & 0xff));
+        raf.write((int) (value & 0xff));
+    }
+
+    private static void writeUInt64(RandomAccessFile raf, long value) throws IOException {
+        writeUInt32(raf, (value >> 32) & 0xffffffffL);
+        writeUInt32(raf, value & 0xffffffffL);
     }
 
     private static Uri collectionFor(MediaItem item) {
