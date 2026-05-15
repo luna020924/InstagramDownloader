@@ -30,6 +30,8 @@ final class MediaStoreSaver {
     }
 
     static String download(Context context, MediaItem item, int index, int total, Progress progress) throws IOException {
+        long savedAtMillis = System.currentTimeMillis();
+        long savedAtSeconds = savedAtMillis / 1000L;
         HttpURLConnection connection = (HttpURLConnection) new URL(item.url).openConnection();
         connection.setConnectTimeout(15000);
         connection.setReadTimeout(60000);
@@ -52,6 +54,7 @@ final class MediaStoreSaver {
         ContentValues values = new ContentValues();
         values.put(MediaStore.MediaColumns.DISPLAY_NAME, displayName);
         values.put(MediaStore.MediaColumns.MIME_TYPE, mimeFor(item, contentType, extension));
+        putDownloadTimestamps(values, item, savedAtMillis, savedAtSeconds, true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePathFor(item));
             values.put(MediaStore.MediaColumns.IS_PENDING, 1);
@@ -66,14 +69,9 @@ final class MediaStoreSaver {
              OutputStream output = resolver.openOutputStream(destination)) {
             if (output == null) throw new IOException("Could not open destination stream.");
             byte[] buffer = new byte[64 * 1024];
-            long copied = 0;
             int read;
             while ((read = input.read(buffer)) != -1) {
                 output.write(buffer, 0, read);
-                copied += read;
-                if (copied > 0 && copied % (1024 * 1024) < buffer.length) {
-                    progress.onProgress(index + "/" + total + " 저장 중: " + copied / (1024 * 1024) + " MB");
-                }
             }
         } catch (IOException e) {
             resolver.delete(destination, null, null);
@@ -85,8 +83,41 @@ final class MediaStoreSaver {
             done.put(MediaStore.MediaColumns.IS_PENDING, 0);
             resolver.update(destination, done, null, null);
         }
+        updateDownloadTimestampBestEffort(resolver, destination, item, savedAtMillis, savedAtSeconds);
 
         return displayName;
+    }
+
+    private static void putDownloadTimestamps(
+            ContentValues values,
+            MediaItem item,
+            long millis,
+            long seconds,
+            boolean includeDateAdded) {
+        if (includeDateAdded) {
+            values.put(MediaStore.MediaColumns.DATE_ADDED, seconds);
+        }
+        values.put(MediaStore.MediaColumns.DATE_MODIFIED, seconds);
+        if (item.kind == MediaItem.Kind.VIDEO) {
+            values.put(MediaStore.Video.Media.DATE_TAKEN, millis);
+        } else {
+            values.put(MediaStore.Images.Media.DATE_TAKEN, millis);
+        }
+    }
+
+    private static void updateDownloadTimestampBestEffort(
+            ContentResolver resolver,
+            Uri destination,
+            MediaItem item,
+            long millis,
+            long seconds) {
+        ContentValues timestamps = new ContentValues();
+        putDownloadTimestamps(timestamps, item, millis, seconds, false);
+        try {
+            resolver.update(destination, timestamps, null, null);
+        } catch (RuntimeException ignored) {
+            // Some gallery providers reject date updates; the inserted values above still cover normal MediaStore.
+        }
     }
 
     private static Uri collectionFor(MediaItem item) {

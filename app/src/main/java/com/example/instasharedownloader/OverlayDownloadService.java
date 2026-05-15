@@ -103,11 +103,8 @@ public final class OverlayDownloadService extends Service {
     }
 
     private void startExtraction(String instagramUrl) {
-        appendStatus("분석 시작: " + instagramUrl);
+        appendStatus("공유 링크를 분석하는 중입니다.");
         InstagramExtractor.updateSessionCookie(CookieManager.getInstance().getCookie("https://www.instagram.com/"));
-        if (!MediaExtractor.isTwitterUrl(instagramUrl) && !hasInstagramSession()) {
-            appendStatus("Instagram 로그인 세션이 없으면 일부 게시물은 실패할 수 있습니다.");
-        }
 
         executor.execute(() -> {
             try {
@@ -115,8 +112,7 @@ public final class OverlayDownloadService extends Service {
                 mainHandler.post(() -> showExtractedItems(instagramUrl, items));
             } catch (IOException e) {
                 if (shouldRenderWithWebView(e, instagramUrl)) {
-                    postStatus("HTTP 추출 실패: " + e.getMessage());
-                    postStatus("저장된 Instagram 세션으로 페이지를 렌더링합니다.");
+                    postStatus("Instagram 세션으로 다시 분석 중입니다.");
                     mainHandler.post(() -> extractWithRenderedWebView(instagramUrl));
                 } else {
                     mainHandler.post(() -> showDoneOverlay(
@@ -239,7 +235,7 @@ public final class OverlayDownloadService extends Service {
         Ui.stylePrimary(sharedOnly);
         sharedOnly.setOnClickListener(v -> {
             List<MediaItem> sharedItems = MediaExtractor.sharedStoryItemsOnly(items);
-            showProgressOverlay("다운로드 중", "공유받은 스토리 " + sharedItems.size() + "개 다운로드 시작");
+            showProgressOverlay("다운로드 중", "다운로드 중입니다. (" + sharedItems.size() + "개)");
             startSelectedDownload(sharedItems);
         });
         panel.addView(sharedOnly, new LinearLayout.LayoutParams(
@@ -411,7 +407,7 @@ public final class OverlayDownloadService extends Service {
                 subtitle.setTextColor(Ui.DANGER);
                 return;
             }
-            showProgressOverlay("다운로드 중", "선택한 미디어 " + chosen.size() + "개 다운로드 시작");
+            showProgressOverlay("다운로드 중", "다운로드 중입니다. (" + chosen.size() + "개)");
             startSelectedDownload(chosen);
         });
         LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(0, dp(48), 1.4f);
@@ -427,14 +423,13 @@ public final class OverlayDownloadService extends Service {
                 int index = 1;
                 for (MediaItem item : selectedItems) {
                     int current = index;
-                    postStatus(current + "/" + selectedItems.size() + " 다운로드 시작");
-                    String name = MediaStoreSaver.download(
+                    postStatus("다운로드 중... (" + current + "/" + selectedItems.size() + ")");
+                    MediaStoreSaver.download(
                             this,
                             item,
                             current,
                             selectedItems.size(),
                             this::postStatus);
-                    postStatus("저장 완료: " + name);
                     index++;
                 }
                 mainHandler.post(() -> showDoneOverlay(
@@ -570,7 +565,7 @@ public final class OverlayDownloadService extends Service {
 
     private void appendStatus(String message) {
         if (statusView == null) return;
-        statusView.append((statusView.length() == 0 ? "" : "\n") + message);
+        statusView.setText(message);
     }
 
     private void postStatus(String message) {

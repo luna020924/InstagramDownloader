@@ -329,7 +329,6 @@ public final class MainActivity extends Activity {
         String sharedUrl = MediaExtractor.extractSupportedUrl(candidate);
         if (sharedUrl != null) {
             urlField.setText(sharedUrl);
-            appendLog("공유 링크 감지: " + sharedUrl);
             startDownload(sharedUrl);
         }
     }
@@ -350,12 +349,8 @@ public final class MainActivity extends Activity {
 
         downloadButton.setEnabled(false);
         loginButton.setEnabled(false);
-        logView.setText("");
-        appendLog("분석 시작: " + sharedUrl);
+        setLog("링크 분석 중...");
         InstagramExtractor.updateSessionCookie(CookieManager.getInstance().getCookie("https://www.instagram.com/"));
-        if (!MediaExtractor.isTwitterUrl(sharedUrl) && !hasInstagramSession()) {
-            appendLog("앱 내부 Instagram 로그인 세션이 없습니다. 실패하면 Instagram 로그인 버튼으로 먼저 로그인하세요.");
-        }
 
         executor.execute(() -> {
             try {
@@ -363,8 +358,7 @@ public final class MainActivity extends Activity {
                 mainHandler.post(() -> showExtractedItems(sharedUrl, items));
             } catch (IOException e) {
                 if (shouldRenderWithWebView(e, sharedUrl)) {
-                    postLog("HTTP 추출 실패: " + e.getMessage());
-                    postLog("저장된 Instagram 세션으로 페이지를 렌더링해서 다시 찾는 중");
+                    postLogReplace("Instagram 세션으로 다시 분석 중...");
                     mainHandler.post(() -> extractWithRenderedWebView(sharedUrl));
                 } else {
                     postFailure(e);
@@ -502,8 +496,7 @@ public final class MainActivity extends Activity {
             handled[0] = true;
             dialog.dismiss();
             List<MediaItem> sharedItems = MediaExtractor.sharedStoryItemsOnly(items);
-            logView.setText("");
-            appendLog("공유받은 스토리 " + sharedItems.size() + "개 다운로드 시작");
+            setLog("다운로드 중... (" + sharedItems.size() + "개)");
             startSelectedDownload(sharedItems);
         });
         root.addView(sharedOnly, new LinearLayout.LayoutParams(
@@ -648,8 +641,7 @@ public final class MainActivity extends Activity {
             }
             handled[0] = true;
             dialog.dismiss();
-            logView.setText("");
-            appendLog("선택한 미디어 " + chosen.size() + "개 다운로드 시작");
+            setLog("다운로드 중... (" + chosen.size() + "개)");
             startSelectedDownload(chosen);
         });
         LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(0, dp(48), 1.4f);
@@ -685,16 +677,14 @@ public final class MainActivity extends Activity {
     }
 
     private void downloadItems(List<MediaItem> items) throws IOException {
-        postLog("미디어 " + items.size() + "개 발견");
         int index = 1;
         for (MediaItem item : items) {
             int current = index;
-            postLog(current + "/" + items.size() + " 다운로드 시작");
-            String name = MediaStoreSaver.download(this, item, current, items.size(), this::postLog);
-            postLog("저장 완료: " + name);
+            postLogReplace("다운로드 중... (" + current + "/" + items.size() + ")");
+            MediaStoreSaver.download(this, item, current, items.size(), this::postLogReplace);
             index++;
         }
-        postLog("완료. 사진/동영상 앱의 InstaShareDownloader 폴더를 확인하세요.");
+        postLogReplace("다운로드 완료: " + items.size() + "개\n사진/동영상 앱의 InstaShareDownloader 폴더를 확인하세요.");
     }
 
     private void loadThumbnailInto(ImageView imageView, String thumbnailUrl) {
@@ -760,8 +750,16 @@ public final class MainActivity extends Activity {
         logView.append((logView.length() == 0 ? "" : "\n") + message);
     }
 
+    private void setLog(String message) {
+        logView.setText(message);
+    }
+
     private void postLog(String message) {
         mainHandler.post(() -> appendLog(message));
+    }
+
+    private void postLogReplace(String message) {
+        mainHandler.post(() -> setLog(message));
     }
 
     private int dp(int value) {
