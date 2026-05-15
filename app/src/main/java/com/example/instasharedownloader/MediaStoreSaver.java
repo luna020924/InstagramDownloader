@@ -57,7 +57,7 @@ final class MediaStoreSaver {
             String contentType = connection.getContentType();
             String extension = extensionFor(item, contentType, item.url);
             String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-            String displayName = String.format(Locale.US, "%s_%s_%02d%s", item.filePrefix, stamp, index, extension);
+            String displayName = displayNameFor(item, stamp, index, total, extension);
 
             if (item.kind == MediaItem.Kind.VIDEO && ".mp4".equals(extension)) {
                 tempFile = File.createTempFile("insta_share_video_", ".mp4", context.getCacheDir());
@@ -125,6 +125,25 @@ final class MediaStoreSaver {
         while ((read = input.read(buffer)) != -1) {
             output.write(buffer, 0, read);
         }
+    }
+
+    private static String displayNameFor(MediaItem item, String stamp, int index, int total, String extension) {
+        String customBase = sanitizeFileNameBase(item.fileNameBase);
+        if (customBase != null) {
+            String suffix = total > 1 ? String.format(Locale.US, "_%02d", index) : "";
+            return customBase + suffix + extension;
+        }
+        return String.format(Locale.US, "%s_%s_%02d%s", item.filePrefix, stamp, index, extension);
+    }
+
+    private static String sanitizeFileNameBase(String raw) {
+        if (raw == null) return null;
+        String cleaned = raw
+                .replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (cleaned.isEmpty()) return null;
+        return cleaned.length() > 90 ? cleaned.substring(0, 90).trim() : cleaned;
     }
 
     private static void putDownloadTimestamps(

@@ -11,7 +11,10 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -52,11 +55,12 @@ final class TwitterExtractor {
                 throw new IOException("No downloadable Twitter/X media was found.");
             }
 
+            String fileNameBase = tweetFileNameBase(root);
             List<MediaItem> items = new ArrayList<>();
             for (int i = 0; i < mediaDetails.length(); i++) {
                 JSONObject media = mediaDetails.optJSONObject(i);
                 if (media == null) continue;
-                MediaItem item = toMediaItem(media);
+                MediaItem item = toMediaItem(media, fileNameBase);
                 if (item != null) items.add(item);
             }
 
@@ -69,7 +73,7 @@ final class TwitterExtractor {
         }
     }
 
-    private static MediaItem toMediaItem(JSONObject media) {
+    private static MediaItem toMediaItem(JSONObject media, String fileNameBase) {
         String type = cleanString(media, "type");
         String mediaUrl = cleanString(media, "media_url_https");
         if (type == null) return null;
@@ -82,7 +86,8 @@ final class TwitterExtractor {
                         MediaItem.Kind.IMAGE,
                         mediaUrl,
                         "twitter",
-                        "https://x.com/");
+                        "https://x.com/",
+                        fileNameBase);
             case "video":
             case "animated_gif":
                 String video = bestMp4Variant(media.optJSONObject("video_info"));
@@ -92,7 +97,8 @@ final class TwitterExtractor {
                         MediaItem.Kind.VIDEO,
                         mediaUrl == null ? video : mediaUrl,
                         "twitter",
-                        "https://x.com/");
+                        "https://x.com/",
+                        fileNameBase);
             default:
                 return null;
         }
@@ -182,6 +188,55 @@ final class TwitterExtractor {
         if (kept.length() > 0) kept.append('&');
         kept.append("name=orig");
         return path + "?" + kept + fragment;
+    }
+
+    private static String tweetFileNameBase(JSONObject root) {
+        String author = tweetAuthorName(root);
+        String date = tweetDate(root);
+        if (author == null && date == null) return null;
+        if (author == null) author = "twitter";
+        if (date == null) return author;
+        return author + " " + date;
+    }
+
+    private static String tweetAuthorName(JSONObject root) {
+        JSONObject user = root.optJSONObject("user");
+        if (user != null) {
+            String name = cleanString(user, "name");
+            if (name != null) return name;
+
+            String screenName = cleanString(user, "screen_name");
+            if (screenName != null) return screenName;
+        }
+
+        String authorName = cleanString(root, "author_name");
+        if (authorName != null) return authorName;
+        return cleanString(root, "screen_name");
+    }
+
+    private static String tweetDate(JSONObject root) {
+        String createdAt = cleanString(root, "created_at");
+        if (createdAt == null) createdAt = cleanString(root, "createdAt");
+        Date parsed = parseTweetDate(createdAt);
+        if (parsed == null) return null;
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(parsed);
+    }
+
+    private static Date parseTweetDate(String value) {
+        if (value == null) return null;
+        String[] patterns = {
+                "yyyy-MM-dd'T'HH:mm:ss.SSSX",
+                "yyyy-MM-dd'T'HH:mm:ssX",
+                "EEE MMM dd HH:mm:ss Z yyyy",
+                "EEE, dd MMM yyyy HH:mm:ss Z"
+        };
+        for (String pattern : patterns) {
+            try {
+                return new SimpleDateFormat(pattern, Locale.US).parse(value);
+            } catch (ParseException ignored) {
+            }
+        }
+        return null;
     }
 
     private static String cleanString(JSONObject object, String name) {
