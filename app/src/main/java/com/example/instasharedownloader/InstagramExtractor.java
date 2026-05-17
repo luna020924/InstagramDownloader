@@ -607,18 +607,18 @@ final class InstagramExtractor {
         String captionUserName = preferredInstagramUserName(captionUser);
         if (captionUserName != null) return captionUserName;
 
-        String directFullName = cleanString(media, "full_name");
-        if (directFullName != null) return directFullName;
+        String directUsername = cleanString(media, "username");
+        if (directUsername != null) return directUsername;
 
-        return cleanString(media, "username");
+        return cleanString(media, "full_name");
     }
 
     private static String preferredInstagramUserName(JSONObject user) {
         if (user == null) return null;
-        String fullName = cleanString(user, "full_name");
-        if (fullName != null) return fullName;
         String username = cleanString(user, "username");
         if (username != null) return username;
+        String fullName = cleanString(user, "full_name");
+        if (fullName != null) return fullName;
         return cleanString(user, "name");
     }
 
