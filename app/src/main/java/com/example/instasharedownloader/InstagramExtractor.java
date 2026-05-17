@@ -17,7 +17,9 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -286,13 +288,14 @@ final class InstagramExtractor {
 
         LinkedHashMap<String, MediaItem> all = new LinkedHashMap<>();
         boolean foundRequested = requestedMediaId == null;
+        String reelAuthor = instagramAuthorName(reel);
         for (int i = 0; i < items.length(); i++) {
             JSONObject item = items.optJSONObject(i);
             if (item == null) continue;
 
             boolean sharedStory = storyItemMatches(item, requestedMediaId);
             if (sharedStory) foundRequested = true;
-            collectStoryMedia(item, all, sharedStory);
+            collectStoryMedia(item, all, sharedStory, reelAuthor);
         }
 
         if (requestedMediaId != null && markFirstIfMissing && !foundRequested && !all.isEmpty()) {
@@ -313,6 +316,7 @@ final class InstagramExtractor {
                     item.thumbnailUrl,
                     item.filePrefix,
                     item.referer,
+                    item.fileNameBase,
                     item.storyItem,
                     shared));
         }
@@ -333,8 +337,8 @@ final class InstagramExtractor {
                 || first.thumbnailUrl.equals(second.url);
     }
 
-    private static void collectStoryMedia(JSONObject media, Map<String, MediaItem> out, boolean sharedStory) {
-        collectSingleMedia(media, out, true, sharedStory);
+    private static void collectStoryMedia(JSONObject media, Map<String, MediaItem> out, boolean sharedStory, String inheritedAuthor) {
+        collectSingleMedia(media, out, true, sharedStory, inheritedAuthor, null);
     }
 
     private static void markFirstStoryAsShared(LinkedHashMap<String, MediaItem> out) {
@@ -348,6 +352,7 @@ final class InstagramExtractor {
                 item.thumbnailUrl,
                 item.filePrefix,
                 item.referer,
+                item.fileNameBase,
                 true,
                 true));
     }
@@ -523,15 +528,19 @@ final class InstagramExtractor {
     }
 
     private static void collectMediaObject(JSONObject media, Map<String, MediaItem> out) {
+        String inheritedAuthor = instagramAuthorName(media);
+        String inheritedFileNameBase = instagramFileNameBase(media, null);
         JSONArray carousel = media.optJSONArray("carousel_media");
         if (carousel != null) {
             for (int i = 0; i < carousel.length(); i++) {
                 JSONObject child = carousel.optJSONObject(i);
-                if (child != null) collectSingleMedia(child, out);
+                if (child != null) {
+                    collectSingleMedia(child, out, false, false, inheritedAuthor, inheritedFileNameBase);
+                }
             }
             return;
         }
-        collectSingleMedia(media, out);
+        collectSingleMedia(media, out, false, false, inheritedAuthor, inheritedFileNameBase);
     }
 
     private static void collectSingleMedia(JSONObject media, Map<String, MediaItem> out) {
@@ -539,24 +548,126 @@ final class InstagramExtractor {
     }
 
     private static void collectSingleMedia(JSONObject media, Map<String, MediaItem> out, boolean storyItem, boolean sharedStory) {
+        collectSingleMedia(media, out, storyItem, sharedStory, null, null);
+    }
+
+    private static void collectSingleMedia(
+            JSONObject media,
+            Map<String, MediaItem> out,
+            boolean storyItem,
+            boolean sharedStory,
+            String inheritedAuthor,
+            String inheritedFileNameBase) {
+        String fileNameBase = instagramFileNameBase(media, inheritedAuthor);
+        if (fileNameBase == null) fileNameBase = inheritedFileNameBase;
+
         JSONObject versions = media.optJSONObject("image_versions2");
         JSONArray imageCandidates = versions == null ? null : versions.optJSONArray("candidates");
         String image = bestImageUrl(imageCandidates);
         String thumbnail = thumbnailImageUrl(imageCandidates);
         String video = bestVideoUrl(media.optJSONArray("video_versions"));
         if (storyItem && storyShouldPreferImage(media) && image != null) {
-            add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, true, sharedStory);
+            add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, fileNameBase, true, sharedStory);
             return;
         }
 
         if (video != null) {
-            add(out, video, MediaItem.Kind.VIDEO, thumbnail == null ? image : thumbnail, storyItem, sharedStory);
+            add(out, video, MediaItem.Kind.VIDEO, thumbnail == null ? image : thumbnail, fileNameBase, storyItem, sharedStory);
             return;
         }
 
         if (image != null) {
-            add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, storyItem, sharedStory);
+            add(out, image, MediaItem.Kind.IMAGE, thumbnail == null ? image : thumbnail, fileNameBase, storyItem, sharedStory);
         }
+    }
+
+    private static String instagramFileNameBase(JSONObject media, String inheritedAuthor) {
+        String ownAuthor = instagramAuthorName(media);
+        String author = ownAuthor == null ? cleanText(inheritedAuthor) : ownAuthor;
+        String date = instagramTakenDate(media);
+        if (author == null && date == null) return null;
+        if (author == null) author = "instagram";
+        if (date == null) return ownAuthor == null ? null : author;
+        return author + " " + date;
+    }
+
+    private static String instagramAuthorName(JSONObject media) {
+        if (media == null) return null;
+
+        JSONObject user = media.optJSONObject("user");
+        String userName = preferredInstagramUserName(user);
+        if (userName != null) return userName;
+
+        JSONObject owner = media.optJSONObject("owner");
+        String ownerName = preferredInstagramUserName(owner);
+        if (ownerName != null) return ownerName;
+
+        JSONObject caption = media.optJSONObject("caption");
+        JSONObject captionUser = caption == null ? null : caption.optJSONObject("user");
+        String captionUserName = preferredInstagramUserName(captionUser);
+        if (captionUserName != null) return captionUserName;
+
+        String directFullName = cleanString(media, "full_name");
+        if (directFullName != null) return directFullName;
+
+        return cleanString(media, "username");
+    }
+
+    private static String preferredInstagramUserName(JSONObject user) {
+        if (user == null) return null;
+        String fullName = cleanString(user, "full_name");
+        if (fullName != null) return fullName;
+        String username = cleanString(user, "username");
+        if (username != null) return username;
+        return cleanString(user, "name");
+    }
+
+    private static String instagramTakenDate(JSONObject media) {
+        Long seconds = instagramTakenAtSeconds(media);
+        if (seconds == null) return null;
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(seconds * 1000L));
+    }
+
+    private static Long instagramTakenAtSeconds(JSONObject media) {
+        if (media == null) return null;
+
+        Long value = epochSeconds(media, "taken_at");
+        if (value != null) return value;
+
+        value = epochSeconds(media, "taken_at_timestamp");
+        if (value != null) return value;
+
+        value = epochSeconds(media, "created_at");
+        if (value != null) return value;
+
+        JSONObject caption = media.optJSONObject("caption");
+        if (caption != null) {
+            value = epochSeconds(caption, "created_at");
+            if (value != null) return value;
+        }
+
+        return epochSeconds(media, "date");
+    }
+
+    private static Long epochSeconds(JSONObject object, String name) {
+        Object value = object == null ? null : object.opt(name);
+        if (value == null || value == JSONObject.NULL) return null;
+
+        long raw;
+        if (value instanceof Number) {
+            raw = ((Number) value).longValue();
+        } else {
+            try {
+                raw = Long.parseLong(String.valueOf(value).trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        if (raw <= 0) return null;
+        if (raw > 1000000000000000L) raw /= 1000000L;
+        if (raw > 10000000000L) raw /= 1000L;
+        return raw;
     }
 
     private static boolean storyShouldPreferImage(JSONObject media) {
@@ -750,6 +861,17 @@ final class InstagramExtractor {
     }
 
     private static void add(Map<String, MediaItem> out, String url, MediaItem.Kind kind, String thumbnailUrl, boolean storyItem, boolean sharedStory) {
+        add(out, url, kind, thumbnailUrl, null, storyItem, sharedStory);
+    }
+
+    private static void add(
+            Map<String, MediaItem> out,
+            String url,
+            MediaItem.Kind kind,
+            String thumbnailUrl,
+            String fileNameBase,
+            boolean storyItem,
+            boolean sharedStory) {
         url = cleanupMediaUrl(url);
         if (!looksLikeMediaUrl(url)) return;
         thumbnailUrl = cleanupMediaUrl(thumbnailUrl);
@@ -762,6 +884,7 @@ final class InstagramExtractor {
                 thumbnailUrl,
                 "instagram",
                 "https://www.instagram.com/",
+                fileNameBase,
                 storyItem,
                 sharedStory));
     }
@@ -936,6 +1059,18 @@ final class InstagramExtractor {
             return MediaItem.Kind.VIDEO;
         }
         return MediaItem.Kind.IMAGE;
+    }
+
+    private static String cleanString(JSONObject object, String name) {
+        if (object == null) return null;
+        return cleanText(object.optString(name, null));
+    }
+
+    private static String cleanText(String value) {
+        if (value == null) return null;
+        String cleaned = htmlDecode(value).trim();
+        if (cleaned.isEmpty() || "null".equals(cleaned.toLowerCase(Locale.US))) return null;
+        return cleaned;
     }
 
     private static String htmlDecode(String value) {
