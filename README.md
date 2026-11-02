@@ -19,11 +19,11 @@ Instagram이나 Twitter/X에서 본 사진과 영상을 안드로이드 폰에 �
 
 ## 설치 파일
 
-- 현재 버전: `0.1.0`
-- 파일 이름: `InstaShareDownloader-0.1.0-debug.apk`
-- GitHub 릴리스 태그: `v0.1.0`
+- 현재 소스 버전: `0.1.1` — Instagram 스토리 조회와 인증 호환성을 수정했습니다.
+- 수정본 빌드 파일: `InstaShareDownloader-0.1.1-debug.apk`
+- 기존 GitHub 공개 릴리스: `v0.1.0` — 스토리 수정이 포함되기 전 버전입니다.
 
-최신 설치 파일은 GitHub 릴리스에 첨부되어 있습니다.
+공개된 설치 파일은 GitHub 릴리스에서 확인할 수 있습니다. `0.1.1` 수정본을 직접 만들려면 아래 빌드 방법을 이용하세요.
 
 ## 사용 방법
 
@@ -70,5 +70,16 @@ Instagram 스토리 링크를 공유하면 앱이 먼저 물어봅니다.
 빌드가 끝나면 APK는 아래 위치에 만들어집니다.
 
 ```text
-app/build/outputs/apk/debug/InstaShareDownloader-0.1.0-debug.apk
+app/build/outputs/apk/debug/InstaShareDownloader-0.1.1-debug.apk
 ```
+
+## 테스트
+
+```bash
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+```
+
+스토리 인증 헤더·응답 형식·공유한 항목 선택과 게시물 추출을 단위 테스트로 확인합니다.
+기기 테스트는 기본적으로 네트워크에 접속하지 않으며, `liveInstagram=true`를 명시한 경우에만 기기의 기존 로그인 세션으로 조회합니다.
+`downloadMedia=true`를 추가하면 사진과 동영상을 임시 저장해 파일을 확인한 뒤 해당 테스트 파일만 삭제합니다.
+실제 세션값과 미디어 주소는 테스트 출력에 기록하지 않습니다.

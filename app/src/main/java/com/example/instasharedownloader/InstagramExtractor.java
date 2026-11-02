@@ -267,14 +267,14 @@ final class InstagramExtractor {
 
     private static List<MediaItem> fetchStoryEndpoint(String endpoint, String pageUrl, String cookie, String requestedMediaId, boolean markFirstIfMissing) throws JSONException {
         try {
-            String body = fetchApi(endpoint, pageUrl, cookie);
+            String body = InstagramStoryApi.fetch(endpoint, pageUrl, cookie);
             return parseStoryMedia(body, requestedMediaId, markFirstIfMissing);
         } catch (IOException e) {
             return new ArrayList<>();
         }
     }
 
-    private static List<MediaItem> parseStoryMedia(String json, String requestedMediaId) throws JSONException {
+    static List<MediaItem> parseStoryMedia(String json, String requestedMediaId) throws JSONException {
         return parseStoryMedia(json, requestedMediaId, true);
     }
 
@@ -420,22 +420,21 @@ final class InstagramExtractor {
     }
 
     private static String resolveStoryUserId(String pageUrl, StoryRequest request, String cookie) {
-        String userId = null;
+        String userId = request.mediaId == null ? null
+                : resolveMediaInfoUserId(request.mediaId, pageUrl, cookie);
+        if (userId != null && !userId.isEmpty()) return userId;
 
         if (request.username != null) {
-            userId = resolveReelsTrayUserId(request.username, pageUrl, cookie);
-            if ((userId == null || userId.isEmpty()) && request.mediaId != null) {
-                userId = resolveMediaInfoUserId(request.mediaId, pageUrl, cookie);
+            String nativeProfile = "https://www.instagram.com/api/v1/users/"
+                    + urlEncode(request.username) + "/usernameinfo/";
+            userId = resolveProfileUserId(nativeProfile, pageUrl, cookie);
+            if (userId == null || userId.isEmpty()) {
+                userId = resolveReelsTrayUserId(request.username, pageUrl, cookie);
             }
             if (userId == null || userId.isEmpty()) {
                 String endpoint = "https://www.instagram.com/api/v1/users/web_profile_info/?username="
                         + urlEncode(request.username);
                 userId = resolveProfileUserId(endpoint, pageUrl, cookie);
-            }
-            if (userId == null || userId.isEmpty()) {
-                String endpoint = "https://www.instagram.com/api/v1/users/web_profile_info/?username="
-                        + urlEncode(request.username);
-                userId = resolveProfileUserId(endpoint, pageUrl, null);
             }
             if (userId != null && !userId.isEmpty()) return userId;
         }
@@ -454,7 +453,7 @@ final class InstagramExtractor {
     private static String resolveReelsTrayUserId(String username, String pageUrl, String cookie) {
         if (cookie == null || cookie.isEmpty()) return null;
         try {
-            String body = fetchApi("https://www.instagram.com/api/v1/feed/reels_tray/", pageUrl, cookie);
+            String body = InstagramStoryApi.fetch("https://www.instagram.com/api/v1/feed/reels_tray/", pageUrl, cookie);
             JSONObject root = new JSONObject(stripJsonPrefix(body));
             JSONArray tray = root.optJSONArray("tray");
             if (tray == null) return null;
@@ -482,7 +481,7 @@ final class InstagramExtractor {
             String endpoint = "https://www.instagram.com/api/v1/media/"
                     + urlEncode(mediaId)
                     + "/info/";
-            String body = fetchApi(endpoint, pageUrl, cookie);
+            String body = InstagramStoryApi.fetch(endpoint, pageUrl, cookie);
             JSONObject root = new JSONObject(stripJsonPrefix(body));
             JSONArray items = root.optJSONArray("items");
             JSONObject item = items == null || items.length() == 0 ? null : items.optJSONObject(0);
@@ -499,10 +498,11 @@ final class InstagramExtractor {
 
     private static String resolveProfileUserId(String endpoint, String pageUrl, String cookie) {
         try {
-            String body = fetchApi(endpoint, pageUrl, cookie);
+            String body = InstagramStoryApi.fetch(endpoint, pageUrl, cookie);
             JSONObject root = new JSONObject(stripJsonPrefix(body));
             JSONObject data = root.optJSONObject("data");
-            JSONObject user = data == null ? null : data.optJSONObject("user");
+            JSONObject user = root.optJSONObject("user");
+            if (user == null && data != null) user = data.optJSONObject("user");
             if (user == null) return null;
             String userId = user.optString("id", null);
             if (userId == null || userId.isEmpty()) userId = user.optString("pk", null);
@@ -512,7 +512,7 @@ final class InstagramExtractor {
         }
     }
 
-    private static List<MediaItem> parseMediaInfo(String json) throws JSONException {
+    static List<MediaItem> parseMediaInfo(String json) throws JSONException {
         LinkedHashMap<String, MediaItem> results = new LinkedHashMap<>();
         JSONObject root = new JSONObject(stripJsonPrefix(json));
         JSONArray items = root.optJSONArray("items");
