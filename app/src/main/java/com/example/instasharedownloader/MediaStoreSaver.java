@@ -34,6 +34,19 @@ final class MediaStoreSaver {
     }
 
     static String download(Context context, MediaItem item, int index, int total, Progress progress) throws IOException {
+        return downloadResult(context, item, index, total, progress).displayName;
+    }
+
+    static final class SavedMedia {
+        final Uri uri;
+        final String displayName;
+        SavedMedia(Uri uri, String displayName) {
+            this.uri = uri;
+            this.displayName = displayName;
+        }
+    }
+
+    static SavedMedia downloadResult(Context context, MediaItem item, int index, int total, Progress progress) throws IOException {
         long savedAtMillis = System.currentTimeMillis();
         long savedAtSeconds = savedAtMillis / 1000L;
         HttpURLConnection connection = null;
@@ -103,7 +116,7 @@ final class MediaStoreSaver {
             }
             updateDownloadTimestampBestEffort(resolver, destination, item, savedAtMillis, savedAtSeconds);
 
-            return displayName;
+            return new SavedMedia(destination, displayName);
         } finally {
             if (source != null) {
                 try {
