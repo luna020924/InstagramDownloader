@@ -192,12 +192,7 @@ final class InstagramExtractor {
             String body = fetchApi(endpoint, pageUrl, cookie);
             return parseMediaInfo(body);
         } catch (IOException | JSONException e) {
-            try {
-                String endpoint = "https://www.instagram.com/api/v1/media/" + mediaId + "/info/";
-                return parseMediaInfo(InstagramStoryApi.fetch(endpoint, pageUrl, cookie));
-            } catch (IOException | JSONException ignored) {
-                return new ArrayList<>();
-            }
+            return new ArrayList<>();
         }
     }
 

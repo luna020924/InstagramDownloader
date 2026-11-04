@@ -49,28 +49,29 @@ final class TwitterExtractor {
         }
 
         try {
-            JSONObject root = new JSONObject(fetchTweetJson(tweetId));
-            JSONArray mediaDetails = root.optJSONArray("mediaDetails");
-            if (mediaDetails == null || mediaDetails.length() == 0) {
-                throw new IOException("No downloadable Twitter/X media was found.");
-            }
-
-            String fileNameBase = tweetFileNameBase(root);
-            List<MediaItem> items = new ArrayList<>();
-            for (int i = 0; i < mediaDetails.length(); i++) {
-                JSONObject media = mediaDetails.optJSONObject(i);
-                if (media == null) continue;
-                MediaItem item = toMediaItem(media, fileNameBase);
-                if (item != null) items.add(item);
-            }
-
-            if (items.isEmpty()) {
-                throw new IOException("No downloadable Twitter/X photos or MP4 variants were found.");
-            }
-            return items;
+            return parseTweetJson(fetchTweetJson(tweetId));
         } catch (JSONException e) {
             throw new IOException("Twitter/X media metadata could not be parsed.", e);
         }
+    }
+
+    static List<MediaItem> parseTweetJson(String body) throws JSONException, IOException {
+        JSONObject root = new JSONObject(body);
+        JSONArray mediaDetails = root.optJSONArray("mediaDetails");
+        if (mediaDetails == null || mediaDetails.length() == 0) {
+            throw new IOException("No downloadable Twitter/X media was found.");
+        }
+
+        String fileNameBase = tweetFileNameBase(root);
+        List<MediaItem> items = new ArrayList<>();
+        for (int i = 0; i < mediaDetails.length(); i++) {
+            JSONObject media = mediaDetails.optJSONObject(i);
+            if (media == null) continue;
+            MediaItem item = toMediaItem(media, fileNameBase);
+            if (item != null) items.add(item);
+        }
+        if (items.isEmpty()) throw new IOException("No downloadable Twitter/X photos or MP4 variants were found.");
+        return items;
     }
 
     private static MediaItem toMediaItem(JSONObject media, String fileNameBase) {
@@ -84,7 +85,7 @@ final class TwitterExtractor {
                 return new MediaItem(
                         toOriginalImageUrl(mediaUrl),
                         MediaItem.Kind.IMAGE,
-                        mediaUrl,
+                        toThumbnailImageUrl(mediaUrl),
                         "twitter",
                         "https://x.com/",
                         fileNameBase);
@@ -95,7 +96,7 @@ final class TwitterExtractor {
                 return new MediaItem(
                         video,
                         MediaItem.Kind.VIDEO,
-                        mediaUrl == null ? video : mediaUrl,
+                        mediaUrl == null ? video : toThumbnailImageUrl(mediaUrl),
                         "twitter",
                         "https://x.com/",
                         fileNameBase);
@@ -136,16 +137,13 @@ final class TwitterExtractor {
         connection.setRequestProperty("Accept", "application/json");
         connection.setRequestProperty("User-Agent", USER_AGENT);
 
-        int code = connection.getResponseCode();
-        InputStream stream = code >= 400 ? connection.getErrorStream() : connection.getInputStream();
-        if (stream == null) {
-            throw new IOException("X returned HTTP " + code + " for post " + tweetId + ".");
+        try {
+            int code = connection.getResponseCode();
+            if (code < 200 || code > 299) throw new IOException("X returned HTTP " + code + ".");
+            return readFully(connection.getInputStream());
+        } finally {
+            connection.disconnect();
         }
-        String body = readFully(stream);
-        if (code < 200 || code > 299) {
-            throw new IOException("X returned HTTP " + code + " for post " + tweetId + ".");
-        }
-        return body;
     }
 
     private static String readFully(InputStream stream) throws IOException {
@@ -188,6 +186,14 @@ final class TwitterExtractor {
         if (kept.length() > 0) kept.append('&');
         kept.append("name=orig");
         return path + "?" + kept + fragment;
+    }
+
+    static String toThumbnailImageUrl(String url) {
+        if (url == null || !url.startsWith("https://pbs.twimg.com/")) return url;
+        int query = url.indexOf('?');
+        String path = query < 0 ? url : url.substring(0, query);
+        path = path.replaceAll(":(?:small|medium|large|orig)$", "");
+        return path + "?format=jpg&name=small";
     }
 
     private static String tweetFileNameBase(JSONObject root) {

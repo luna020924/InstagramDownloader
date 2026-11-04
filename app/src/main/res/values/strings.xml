@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Insta Share Downloader</string>
+    <string name="main_title">SNS 저장 도우미</string>
+    <string name="main_subtitle">게시물을 공유하면 화면 위 선택창에서 원하는 사진과 영상만 골라 저장합니다.</string>
+    <string name="url_hint">https://www.instagram.com/reel/... 또는 https://x.com/.../status/...</string>
+    <string name="login">Instagram 로그인</string>
+    <string name="overlay_permission">다른 앱 위에 표시 권한</string>
+    <string name="overlay_permission_granted">오버레이 권한 허용됨</string>
+    <string name="download">다운로드</string>
+    <string name="waiting">대기 중</string>
 </resources>

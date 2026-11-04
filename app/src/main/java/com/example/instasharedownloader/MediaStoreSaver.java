@@ -20,6 +20,13 @@ import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 final class MediaStoreSaver {
     private static final String USER_AGENT =
@@ -33,20 +40,42 @@ final class MediaStoreSaver {
     private MediaStoreSaver() {
     }
 
-    static String download(Context context, MediaItem item, int index, int total, Progress progress) throws IOException {
-        return downloadResult(context, item, index, total, progress).displayName;
-    }
-
-    static final class SavedMedia {
-        final Uri uri;
-        final String displayName;
-        SavedMedia(Uri uri, String displayName) {
-            this.uri = uri;
-            this.displayName = displayName;
+    static void downloadAll(Context context, List<MediaItem> items, Progress progress) throws IOException {
+        if (items.size() < 2 || items.stream().anyMatch(item -> item.kind != MediaItem.Kind.IMAGE)) {
+            for (int i = 0; i < items.size(); i++) {
+                progress.onProgress("다운로드 중... (" + i + "/" + items.size() + ")");
+                download(context, items.get(i), i + 1, items.size(), progress);
+            }
+            return;
         }
+        ExecutorService workers = Executors.newFixedThreadPool(Math.min(3, items.size()));
+        AtomicInteger completed = new AtomicInteger();
+        List<Future<?>> downloads = new ArrayList<>();
+        try {
+            for (int i = 0; i < items.size(); i++) {
+                final int index = i;
+                downloads.add(workers.submit(() -> {
+                    download(context, items.get(index), index + 1, items.size(), progress);
+                    progress.onProgress("다운로드 중... (" + completed.incrementAndGet() + "/" + items.size() + ")");
+                    return null;
+                }));
+            }
+            IOException failure = null;
+            for (Future<?> download : downloads) {
+                try { download.get(); }
+                catch (ExecutionException error) {
+                    if (failure == null) failure = error.getCause() instanceof IOException
+                            ? (IOException) error.getCause() : new IOException("Media save failed.", error.getCause());
+                }
+            }
+            if (failure != null) throw failure;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Download interrupted.", error);
+        } finally { workers.shutdownNow(); }
     }
 
-    static SavedMedia downloadResult(Context context, MediaItem item, int index, int total, Progress progress) throws IOException {
+    static String download(Context context, MediaItem item, int index, int total, Progress progress) throws IOException {
         long savedAtMillis = System.currentTimeMillis();
         long savedAtSeconds = savedAtMillis / 1000L;
         HttpURLConnection connection = null;
@@ -116,7 +145,7 @@ final class MediaStoreSaver {
             }
             updateDownloadTimestampBestEffort(resolver, destination, item, savedAtMillis, savedAtSeconds);
 
-            return new SavedMedia(destination, displayName);
+            return displayName;
         } finally {
             if (source != null) {
                 try {
